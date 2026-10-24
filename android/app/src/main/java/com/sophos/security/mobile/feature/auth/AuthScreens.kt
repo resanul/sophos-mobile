@@ -68,10 +68,10 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit,
     onNavigateToMfa: () -> Unit
 ) {
-    var email by remember { mutableStateOf("soc-responder@enterprise.local") }
-    var password by remember { mutableStateOf("••••••••••••") }
-    var serverHost by remember { mutableStateOf("https://soc-gateway.corp.local") }
-    var isLoading by remember { mutableStateOf(false) }
+    var clientId by remember { mutableStateOf(com.sophos.security.mobile.core.network.MockSecurityRepository.clientId) }
+    var clientSecret by remember { mutableStateOf(com.sophos.security.mobile.core.network.MockSecurityRepository.clientSecret) }
+    var dataRegion by remember { mutableStateOf(com.sophos.security.mobile.core.network.MockSecurityRepository.dataRegionUrl) }
+    var isConnecting by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -90,49 +90,49 @@ fun LoginScreen(
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    text = "SOPHOS CENTRAL",
+                    text = "SOPHOS CENTRAL CLOUD",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
                 Text(
-                    text = "Mobile Gateway Authentication",
+                    text = "Direct Mobile API Gateway",
                     style = MaterialTheme.typography.labelSmall,
                     color = DarkOnSurfaceMuted
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Security Analyst Email") },
-            leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = DarkOnSurfaceMuted) },
+            value = clientId,
+            onValueChange = { clientId = it },
+            label = { Text("Sophos Client ID") },
+            leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null, tint = DarkOnSurfaceMuted) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Master Password") },
+            value = clientSecret,
+            onValueChange = { clientSecret = it },
+            label = { Text("Sophos Client Secret") },
             leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = DarkOnSurfaceMuted) },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         OutlinedTextField(
-            value = serverHost,
-            onValueChange = { serverHost = it },
-            label = { Text("Gateway Endpoint URL") },
-            leadingIcon = { Icon(Icons.Default.Dns, contentDescription = null, tint = DarkOnSurfaceMuted) },
+            value = dataRegion,
+            onValueChange = { dataRegion = it },
+            label = { Text("Regional API Endpoint") },
+            leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null, tint = DarkOnSurfaceMuted) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -141,8 +141,12 @@ fun LoginScreen(
 
         Button(
             onClick = {
-                isLoading = true
-                onNavigateToMfa()
+                isConnecting = true
+                com.sophos.security.mobile.core.network.MockSecurityRepository.clientId = clientId.trim()
+                com.sophos.security.mobile.core.network.MockSecurityRepository.clientSecret = clientSecret.trim()
+                com.sophos.security.mobile.core.network.MockSecurityRepository.dataRegionUrl = dataRegion.trim()
+                com.sophos.security.mobile.core.network.MockSecurityRepository.refresh()
+                onLoginSuccess()
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -150,11 +154,11 @@ fun LoginScreen(
             shape = RoundedCornerShape(8.dp),
             colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen)
         ) {
-            if (isLoading) {
+            if (isConnecting) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
             } else {
                 Text(
-                    text = "AUTHENTICATE VIA SSO / OIDC",
+                    text = "CONNECT DIRECT TO SOPHOS CENTRAL",
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )

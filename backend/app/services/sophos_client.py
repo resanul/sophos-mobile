@@ -89,7 +89,32 @@ class SophosCentralClient:
             if resp.status_code != 200:
                 logger.warning(f"Live endpoint query failed ({resp.status_code}), falling back to mock provider.")
                 return mock_provider.get_endpoints()
-            return resp.json().get("items", [])
+            
+            raw_items = resp.json().get("items", [])
+            normalized = []
+            for ep in raw_items:
+                health_val = ep.get("health", {}).get("overall", "GOOD")
+                if health_val.lower() in ["good", "healthy"]:
+                    health_state = "GOOD"
+                elif health_val.lower() in ["suspicious", "medium"]:
+                    health_state = "SUSPICIOUS"
+                else:
+                    health_state = "BAD"
+
+                normalized.append({
+                    "id": ep.get("id", ""),
+                    "hostname": ep.get("hostname", "Unknown Device"),
+                    "ip_addresses": ep.get("ipv4Addresses", []),
+                    "os": ep.get("os", {}).get("name", "Windows"),
+                    "health": health_state,
+                    "isolated": ep.get("isolation", {}).get("isolated", False),
+                    "tamper_protection": ep.get("tamperProtection", {}).get("enabled", True),
+                    "last_seen_at": ep.get("lastSeenAt", "Recently"),
+                    "is_server": ep.get("type", "").lower() == "server",
+                    "agent_version": ep.get("coreAgentVersion", "2026.2"),
+                    "group_name": ep.get("group", {}).get("name", "Default Group")
+                })
+            return normalized
 
     async def get_alerts(self) -> List[Dict[str, Any]]:
         if self.is_mock_mode:
@@ -108,67 +133,67 @@ class SophosCentralClient:
             if resp.status_code != 200:
                 logger.warning(f"Live alerts query failed ({resp.status_code}), falling back to mock provider.")
                 return mock_provider.get_alerts()
-            return resp.json().get("items", [])
+            
+            raw_items = resp.json().get("items", [])
+            normalized = []
+            for a in raw_items:
+                sev = a.get("severity", "MEDIUM").upper()
+                if sev not in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+                    sev = "MEDIUM"
+
+                endpoint_name = a.get("managedAgent", {}).get("name") or a.get("endpoint", {}).get("hostname") or "Corporate Host"
+                endpoint_id = a.get("managedAgent", {}).get("id") or a.get("endpoint", {}).get("id") or "ep-0"
+
+                normalized.append({
+                    "id": a.get("id", ""),
+                    "severity": sev,
+                    "category": a.get("category", "Security Alert"),
+                    "description": a.get("description", "Security event detected by Sophos Protection"),
+                    "endpoint_hostname": endpoint_name,
+                    "endpoint_id": endpoint_id,
+                    "detected_at": a.get("raisedAt", "Recently"),
+                    "status": "OPEN",
+                    "product": a.get("product", "Sophos Central"),
+                    "threat_name": a.get("threatName", ""),
+                    "path": a.get("location", "")
+                })
+            return normalized
 
     async def get_detections(self) -> List[Dict[str, Any]]:
-        if self.is_mock_mode:
-            return mock_provider.get_detections()
-
-        token = await self.get_valid_token()
-        url = f"{self._data_region_url}/detections/graphql"
-        query = """
-        query GetRecentDetections {
-            detections(limit: 25) {
-                id
-                severity
-                title
-                category
-                detectedAt
-            }
-        }
-        """
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                url,
-                json={"query": query},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "X-Tenant-ID": self._tenant_id
-                }
-            )
-            if resp.status_code != 200:
-                return mock_provider.get_detections()
-            return resp.json().get("data", {}).get("detections", [])
+        # If tenant does not have XDR package enabled, fallback gracefully
+        try:
+            token = await self.get_valid_token()
+            url = f"{self._data_region_url}/detections/graphql"
+            query = "query GetRecentDetections { detections(limit: 25) { id severity title category detectedAt } }"
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.post(
+                    url,
+                    json={"query": query},
+                    headers={"Authorization": f"Bearer {token}", "X-Tenant-ID": self._tenant_id}
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("data", {}).get("detections", [])
+        except Exception:
+            pass
+        return mock_provider.get_detections()
 
     async def get_cases(self) -> List[Dict[str, Any]]:
-        if self.is_mock_mode:
-            return mock_provider.get_cases()
-
-        token = await self.get_valid_token()
-        url = f"{self._data_region_url}/cases/graphql"
-        query = """
-        query GetCases {
-            cases(limit: 25) {
-                id
-                caseNumber
-                title
-                status
-                priority
-            }
-        }
-        """
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                url,
-                json={"query": query},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "X-Tenant-ID": self._tenant_id
-                }
-            )
-            if resp.status_code != 200:
-                return mock_provider.get_cases()
-            return resp.json().get("data", {}).get("cases", [])
+        # If tenant does not have MDR/Cases package enabled, fallback gracefully
+        try:
+            token = await self.get_valid_token()
+            url = f"{self._data_region_url}/cases/graphql"
+            query = "query GetCases { cases(limit: 25) { id caseNumber title status priority } }"
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.post(
+                    url,
+                    json={"query": query},
+                    headers={"Authorization": f"Bearer {token}", "X-Tenant-ID": self._tenant_id}
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("data", {}).get("cases", [])
+        except Exception:
+            pass
+        return mock_provider.get_cases()
 
     async def isolate_endpoint(self, endpoint_id: str) -> bool:
         if self.is_mock_mode:

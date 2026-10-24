@@ -1,12 +1,55 @@
 package com.sophos.security.mobile.core.network
 
+import android.util.Log
 import com.sophos.security.mobile.core.model.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.*
+import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 
 object MockSecurityRepository {
 
+    private const val TAG = "SophosDirectAPI"
+
+    // Default Sophos Central Service Principal Credentials
+    var clientId: String = "e3c3ef9a-9114-4bd3-b75a-32b2eb223a23"
+    var clientSecret: String = "ee496bce83decc6dd57aa41c2e40a095b99be98d38ece882c1ff34355ac3356695f8dec7dcbea900139e04e7ff733f79057d"
+    var tenantId: String = "f55209e1-802e-45e4-8cf8-f5db160a1ebd"
+    var dataRegionUrl: String = "https://api-us03.central.sophos.com"
+
+    private var cachedToken: String? = null
+    private var tokenExpiryMs: Long = 0L
+
+    var lastSyncStatus: String = "Connecting directly to Sophos Central..."
+        private set
+    var isLiveConnected: Boolean = false
+        private set
+
+    private val isSyncingFlow = MutableStateFlow(false)
+    val isSyncing: Flow<Boolean> = isSyncingFlow.asStateFlow()
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
+
+    private val okHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Initial endpoints state
     private val endpoints = MutableStateFlow(
         listOf(
             Endpoint(
@@ -64,6 +107,7 @@ object MockSecurityRepository {
         )
     )
 
+    // Initial alerts state
     private val alerts = MutableStateFlow(
         listOf(
             Alert(
@@ -191,26 +235,30 @@ object MockSecurityRepository {
         )
     )
 
-    fun getDashboardSummary(): DashboardSummary {
-        val epList = endpoints.value
-        val altList = alerts.value
-        val caseList = cases.value
-        val detList = detections.value
-
-        return DashboardSummary(
-            totalEndpoints = epList.size,
-            healthyEndpoints = epList.count { it.health == HealthState.GOOD && !it.isolated },
-            suspiciousEndpoints = epList.count { it.health == HealthState.SUSPICIOUS },
-            badEndpoints = epList.count { it.health == HealthState.BAD },
-            isolatedEndpoints = epList.count { it.isolated },
-            activeCriticalAlerts = altList.count { it.severity == Severity.CRITICAL && it.status == AlertStatus.OPEN },
-            activeHighAlerts = altList.count { it.severity == Severity.HIGH && it.status == AlertStatus.OPEN },
-            openCases = caseList.count { it.status != CaseStatus.CLOSED },
-            recentDetectionsCount = detList.size,
-            syncFreshnessTimestamp = "Just now",
-            isLiveDataSource = false
+    private val dashboardSummary = MutableStateFlow(
+        DashboardSummary(
+            totalEndpoints = 4,
+            healthyEndpoints = 2,
+            suspiciousEndpoints = 1,
+            badEndpoints = 1,
+            isolatedEndpoints = 1,
+            activeCriticalAlerts = 1,
+            activeHighAlerts = 1,
+            openCases = 2,
+            recentDetectionsCount = 2,
+            syncFreshnessTimestamp = "Starting direct sync...",
+            isLiveDataSource = false,
+            tenantName = "Enterprise Security Operations Tenant",
+            dataRegion = "Sophos Central Cloud"
         )
+    )
+
+    init {
+        refresh()
     }
+
+    fun getDashboardSummary(): DashboardSummary = dashboardSummary.value
+    fun getDashboardSummaryFlow(): Flow<DashboardSummary> = dashboardSummary.asStateFlow()
 
     fun getEndpoints(): Flow<List<Endpoint>> = endpoints.asStateFlow()
     fun getAlerts(): Flow<List<Alert>> = alerts.asStateFlow()
@@ -218,10 +266,293 @@ object MockSecurityRepository {
     fun getCases(): Flow<List<XdrCase>> = cases.asStateFlow()
     fun getHuntTemplates(): List<ThreatHuntTemplate> = threatHuntTemplates
 
+    fun refresh() {
+        repositoryScope.launch {
+            syncDirectFromSophosCentral()
+        }
+    }
+
+    private suspend fun getValidOAuthToken(): String? = withContext(Dispatchers.IO) {
+        if (cachedToken != null && System.currentTimeMillis() < tokenExpiryMs) {
+            return@withContext cachedToken
+        }
+
+        try {
+            val formBody = FormBody.Builder()
+                .add("grant_type", "client_credentials")
+                .add("client_id", clientId)
+                .add("client_secret", clientSecret)
+                .add("scope", "token")
+                .build()
+
+            val req = Request.Builder()
+                .url("https://id.sophos.com/api/v2/oauth2/token")
+                .post(formBody)
+                .build()
+
+            okHttpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val err = resp.body?.string() ?: ""
+                    Log.e(TAG, "OAuth failed HTTP ${resp.code}: $err")
+                    lastSyncStatus = "OAuth auth failed (HTTP ${resp.code})"
+                    return@withContext null
+                }
+
+                val bodyStr = resp.body?.string() ?: return@withContext null
+                val root = json.parseToJsonElement(bodyStr).jsonObject
+                val token = root["access_token"]?.jsonPrimitive?.contentOrNull
+                val expiresIn = root["expires_in"]?.jsonPrimitive?.intOrNull ?: 3600
+
+                if (token != null) {
+                    cachedToken = token
+                    tokenExpiryMs = System.currentTimeMillis() + ((expiresIn - 60).coerceAtLeast(60) * 1000L)
+                    return@withContext token
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching OAuth token: ${e.message}", e)
+            lastSyncStatus = "Network error connecting to id.sophos.com: ${e.message}"
+        }
+        return@withContext null
+    }
+
+    private suspend fun syncDirectFromSophosCentral() = withContext(Dispatchers.IO) {
+        if (isSyncingFlow.value) return@withContext
+        isSyncingFlow.value = true
+        lastSyncStatus = "Authenticating with Sophos Central..."
+
+        val token = getValidOAuthToken()
+        if (token == null) {
+            isSyncingFlow.value = false
+            return@withContext
+        }
+
+        // Auto-discover tenant and region if needed
+        if (tenantId.isEmpty() || dataRegionUrl.isEmpty()) {
+            try {
+                val whoamiReq = Request.Builder()
+                    .url("https://api.central.sophos.com/whoami/v1")
+                    .header("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+                okHttpClient.newCall(whoamiReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: "{}"
+                        val whoamiObj = json.parseToJsonElement(body).jsonObject
+                        val discoveredTenant = whoamiObj["id"]?.jsonPrimitive?.contentOrNull
+                        val discoveredRegion = whoamiObj["apiHosts"]?.jsonObject?.get("dataRegion")?.jsonPrimitive?.contentOrNull
+                        if (!discoveredTenant.isNullOrEmpty()) tenantId = discoveredTenant
+                        if (!discoveredRegion.isNullOrEmpty()) dataRegionUrl = discoveredRegion
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Whoami check skipped: ${e.message}")
+            }
+        }
+
+        var fetchedEndpoints: List<Endpoint>? = null
+        var fetchedAlerts: List<Alert>? = null
+
+        // 1. Direct Endpoints Fetch
+        try {
+            val epReq = Request.Builder()
+                .url("$dataRegionUrl/endpoint/v1/endpoints?view=full&pageTotal=true")
+                .header("Authorization", "Bearer $token")
+                .header("X-Tenant-ID", tenantId)
+                .get()
+                .build()
+
+            okHttpClient.newCall(epReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: "{}"
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+
+                    val list = mutableListOf<Endpoint>()
+                    for (elem in items) {
+                        val epObj = elem.jsonObject
+                        val id = epObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val hostname = epObj["hostname"]?.jsonPrimitive?.contentOrNull ?: "Host-${id.take(6)}"
+
+                        val ips = mutableListOf<String>()
+                        epObj["ipv4Addresses"]?.jsonArray?.forEach { ipElem ->
+                            ipElem.jsonPrimitive.contentOrNull?.let { ips.add(it) }
+                        }
+                        if (ips.isEmpty()) {
+                            epObj["assignedIps"]?.jsonArray?.forEach { ipElem ->
+                                ipElem.jsonPrimitive.contentOrNull?.let { ips.add(it) }
+                            }
+                        }
+
+                        val osName = epObj["os"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Windows"
+                        val overallHealth = epObj["health"]?.jsonObject?.get("overall")?.jsonPrimitive?.contentOrNull?.uppercase() ?: "GOOD"
+                        val health = when (overallHealth) {
+                            "GOOD" -> HealthState.GOOD
+                            "SUSPICIOUS" -> HealthState.SUSPICIOUS
+                            "BAD" -> HealthState.BAD
+                            else -> HealthState.GOOD
+                        }
+
+                        val isolated = epObj["isolation"]?.jsonObject?.get("isolated")?.jsonPrimitive?.booleanOrNull
+                            ?: (epObj["isolation"]?.jsonObject?.get("status")?.jsonPrimitive?.contentOrNull == "isolated")
+
+                        val tamperProtection = epObj["tamperProtectionEnabled"]?.jsonPrimitive?.booleanOrNull
+                            ?: epObj["tamperProtection"]?.jsonObject?.get("enabled")?.jsonPrimitive?.booleanOrNull
+                            ?: true
+
+                        val lastSeen = epObj["lastSeenAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                        val isServer = epObj["type"]?.jsonPrimitive?.contentOrNull?.equals("server", ignoreCase = true)
+                            ?: (epObj["os"]?.jsonObject?.get("isServer")?.jsonPrimitive?.booleanOrNull ?: false)
+                        val agentVersion = epObj["coreAgentVersion"]?.jsonPrimitive?.contentOrNull ?: "2026.2"
+                        val groupName = epObj["group"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Enterprise Core"
+
+                        list.add(
+                            Endpoint(
+                                id = id,
+                                hostname = hostname,
+                                ipAddresses = ips,
+                                os = osName,
+                                health = health,
+                                isolated = isolated,
+                                tamperProtection = tamperProtection,
+                                lastSeenAt = lastSeen,
+                                isServer = isServer,
+                                agentVersion = agentVersion,
+                                groupName = groupName
+                            )
+                        )
+                    }
+                    if (list.isNotEmpty()) {
+                        fetchedEndpoints = list
+                        endpoints.value = list
+                    }
+                } else {
+                    Log.e(TAG, "Endpoints call failed HTTP ${resp.code}: ${resp.body?.string()}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception fetching endpoints: ${e.message}", e)
+        }
+
+        // 2. Direct Alerts Fetch
+        try {
+            val alertReq = Request.Builder()
+                .url("$dataRegionUrl/common/v1/alerts?limit=50")
+                .header("Authorization", "Bearer $token")
+                .header("X-Tenant-ID", tenantId)
+                .get()
+                .build()
+
+            okHttpClient.newCall(alertReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: "{}"
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+
+                    val list = mutableListOf<Alert>()
+                    for (elem in items) {
+                        val aObj = elem.jsonObject
+                        val id = aObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val sevStr = aObj["severity"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
+                        val sev = when (sevStr) {
+                            "CRITICAL" -> Severity.CRITICAL
+                            "HIGH" -> Severity.HIGH
+                            "LOW" -> Severity.LOW
+                            "INFO" -> Severity.INFO
+                            else -> Severity.MEDIUM
+                        }
+
+                        val category = aObj["category"]?.jsonPrimitive?.contentOrNull ?: "Security Alert"
+                        val description = aObj["description"]?.jsonPrimitive?.contentOrNull ?: "Sophos Security Event"
+
+                        val endpointHostname = aObj["managedAgent"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
+                            ?: aObj["endpoint"]?.jsonObject?.get("hostname")?.jsonPrimitive?.contentOrNull
+                            ?: "Managed Device"
+
+                        val endpointId = aObj["managedAgent"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                            ?: aObj["endpoint"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                            ?: ""
+
+                        val detectedAt = aObj["raisedAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                        val product = aObj["product"]?.jsonPrimitive?.contentOrNull ?: "Sophos Central"
+                        val threatName = aObj["threatName"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val path = aObj["location"]?.jsonPrimitive?.contentOrNull ?: ""
+
+                        list.add(
+                            Alert(
+                                id = id,
+                                severity = sev,
+                                category = category,
+                                description = description,
+                                endpointHostname = endpointHostname,
+                                endpointId = endpointId,
+                                detectedAt = detectedAt,
+                                status = AlertStatus.OPEN,
+                                product = product,
+                                threatName = threatName,
+                                path = path
+                            )
+                        )
+                    }
+                    if (list.isNotEmpty()) {
+                        fetchedAlerts = list
+                        alerts.value = list
+                    }
+                } else {
+                    Log.e(TAG, "Alerts call failed HTTP ${resp.code}: ${resp.body?.string()}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception fetching alerts: ${e.message}", e)
+        }
+
+        // 3. Update Dashboard Summary
+        val epList = endpoints.value
+        val altList = alerts.value
+        val caseList = cases.value
+        val detList = detections.value
+
+        val healthyCount = epList.count { it.health == HealthState.GOOD && !it.isolated }
+        val suspCount = epList.count { it.health == HealthState.SUSPICIOUS }
+        val badCount = epList.count { it.health == HealthState.BAD }
+        val isoCount = epList.count { it.isolated }
+
+        val critAlerts = altList.count { it.severity == Severity.CRITICAL && it.status == AlertStatus.OPEN }
+        val highAlerts = altList.count { it.severity == Severity.HIGH && it.status == AlertStatus.OPEN }
+
+        val success = fetchedEndpoints != null || fetchedAlerts != null
+        isLiveConnected = success
+
+        dashboardSummary.value = DashboardSummary(
+            totalEndpoints = epList.size,
+            healthyEndpoints = healthyCount,
+            suspiciousEndpoints = suspCount,
+            badEndpoints = badCount,
+            isolatedEndpoints = isoCount,
+            activeCriticalAlerts = critAlerts,
+            activeHighAlerts = highAlerts,
+            openCases = caseList.count { it.status != CaseStatus.CLOSED },
+            recentDetectionsCount = detList.size,
+            syncFreshnessTimestamp = "Just now",
+            isLiveDataSource = success,
+            tenantName = "Sophos Central Production Tenant",
+            dataRegion = "US-West-2 (api-us03)"
+        )
+
+        lastSyncStatus = if (success) {
+            "Direct Cloud Connected (${epList.size} Endpoints, ${altList.size} Alerts)"
+        } else {
+            "Direct connection attempt finished with fallback"
+        }
+
+        isSyncingFlow.value = false
+    }
+
     fun isolateEndpoint(id: String, note: String): Boolean {
         endpoints.value = endpoints.value.map {
             if (it.id == id) it.copy(isolated = true, health = HealthState.BAD) else it
         }
+        dispatchDirectIsolation(id, true, note)
         return true
     }
 
@@ -229,7 +560,35 @@ object MockSecurityRepository {
         endpoints.value = endpoints.value.map {
             if (it.id == id) it.copy(isolated = false, health = HealthState.GOOD) else it
         }
+        dispatchDirectIsolation(id, false, note)
         return true
+    }
+
+    private fun dispatchDirectIsolation(endpointId: String, enableIsolation: Boolean, comment: String) {
+        repositoryScope.launch {
+            try {
+                val token = getValidOAuthToken() ?: return@launch
+                val jsonPayload = """
+                    {
+                        "enabled": $enableIsolation,
+                        "comment": "${comment.replace("\"", "\\\"")}"
+                    }
+                """.trimIndent()
+
+                val req = Request.Builder()
+                    .url("$dataRegionUrl/endpoint/v1/endpoints/$endpointId/isolation")
+                    .header("Authorization", "Bearer $token")
+                    .header("X-Tenant-ID", tenantId)
+                    .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                okHttpClient.newCall(req).execute().use { resp ->
+                    Log.i(TAG, "Direct isolation command code: ${resp.code}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed direct isolation dispatch: ${e.message}")
+            }
+        }
     }
 
     fun updateCaseStatus(id: String, newStatus: CaseStatus): Boolean {

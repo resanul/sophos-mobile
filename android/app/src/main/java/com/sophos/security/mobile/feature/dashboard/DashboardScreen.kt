@@ -35,9 +35,10 @@ fun DashboardScreen(
     onNavigateToDiagnostics: () -> Unit,
     onNavigateToAlertDetail: (String) -> Unit
 ) {
-    val summary = remember { MockSecurityRepository.getDashboardSummary() }
+    val summary by MockSecurityRepository.getDashboardSummaryFlow().collectAsState(initial = MockSecurityRepository.getDashboardSummary())
     val alerts by MockSecurityRepository.getAlerts().collectAsState(initial = emptyList())
     val endpoints by MockSecurityRepository.getEndpoints().collectAsState(initial = emptyList())
+    val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
 
     Scaffold(
         topBar = {
@@ -45,12 +46,22 @@ fun DashboardScreen(
                 title = "Security Operations",
                 subtitle = "Tenant: ${summary.tenantName} (${summary.dataRegion})",
                 actions = {
-                    IconButton(onClick = onNavigateToDiagnostics) {
-                        Icon(
-                            imageVector = Icons.Default.Sync,
-                            contentDescription = "Diagnostics",
-                            tint = SecurityGreen
-                        )
+                    IconButton(onClick = {
+                        MockSecurityRepository.refresh()
+                    }) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = SecurityGreen,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = "Sync",
+                                tint = SecurityGreen
+                            )
+                        }
                     }
                 }
             )
@@ -81,13 +92,13 @@ fun DashboardScreen(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(SecurityGreen)
+                                .background(if (summary.isLiveDataSource) SecurityGreen else SeverityHigh)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Central API Stream Active",
+                            text = if (summary.isLiveDataSource) "Live Sophos Central Active" else "Central Stream Connecting",
                             style = MaterialTheme.typography.labelSmall,
-                            color = SecurityGreen
+                            color = if (summary.isLiveDataSource) SecurityGreen else SeverityHigh
                         )
                     }
                     Text(

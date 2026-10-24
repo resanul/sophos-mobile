@@ -360,19 +360,48 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
 
 @Composable
 fun DiagnosticsScreen(onNavigateBack: () -> Unit) {
+    val summary by com.sophos.security.mobile.core.network.MockSecurityRepository.getDashboardSummaryFlow().collectAsState(initial = com.sophos.security.mobile.core.network.MockSecurityRepository.getDashboardSummary())
+    val isLive = summary.isLiveDataSource
+    val activeUrl = com.sophos.security.mobile.core.network.MockSecurityRepository.dataRegionUrl
+    val syncStatus = com.sophos.security.mobile.core.network.MockSecurityRepository.lastSyncStatus
+    val isSyncing by com.sophos.security.mobile.core.network.MockSecurityRepository.isSyncing.collectAsState(initial = false)
+
     Scaffold(
-        topBar = { SecurityTopBar("Connectivity Diagnostics", canNavigateBack = true, onNavigateBack = onNavigateBack) },
+        topBar = { SecurityTopBar("Sophos Central Cloud Status", canNavigateBack = true, onNavigateBack = onNavigateBack) },
         containerColor = DarkBackground
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text("GATEWAY STATUS: HEALTHY", style = MaterialTheme.typography.titleSmall, color = SecurityGreen)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("Latency: 42ms | Host: https://soc-gateway.corp.local", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
-                    Text("Sophos Central Token: Valid (OAuth2 JWT)", style = MaterialTheme.typography.bodySmall, color = Color.White)
-                    Text("Data Region: US-EAST-01 (api-us01.central.sophos.com)", style = MaterialTheme.typography.bodySmall, color = Color.White)
-                    Text("Data Source: Active Sandbox Integration", style = MaterialTheme.typography.bodySmall, color = SecurityGreen)
+                    Text(
+                        if (isLive) "SOPHOS CENTRAL: DIRECT CONNECTED" else "SOPHOS CENTRAL: SYNCING",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (isLive) SecurityGreen else SeverityHigh
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Cloud Endpoint: $activeUrl", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                    Text("Connection Status: $syncStatus", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+                    Text("Tenant: ${summary.tenantName}", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                    Text("Live Endpoints: ${summary.totalEndpoints} managed devices", style = MaterialTheme.typography.bodySmall, color = SecurityGreen)
+                    Text("Active Alerts: ${summary.activeHighAlerts + summary.activeCriticalAlerts} security events", style = MaterialTheme.typography.bodySmall, color = SeverityHigh)
+                }
+            }
+
+            Button(
+                onClick = { com.sophos.security.mobile.core.network.MockSecurityRepository.refresh() },
+                enabled = !isSyncing,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen)
+            ) {
+                if (isSyncing) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = DarkBackground)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Syncing Sophos Cloud...", color = DarkBackground, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = null, tint = DarkBackground)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Force Refresh Sophos Central", color = DarkBackground, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                 }
             }
         }

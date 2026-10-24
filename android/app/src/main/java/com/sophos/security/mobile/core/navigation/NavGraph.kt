@@ -100,7 +100,7 @@ fun SophosNavGraph(
             // Auth Flow
             composable(Screen.Splash.route) {
                 SplashScreen(onNavigateToLogin = {
-                    navController.navigate(Screen.Login.route) {
+                    navController.navigate(Screen.Dashboard.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 })
@@ -113,7 +113,9 @@ fun SophosNavGraph(
                         }
                     },
                     onNavigateToMfa = {
-                        navController.navigate(Screen.Mfa.route)
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.Login.route) { inclusive = true }
+                        }
                     }
                 )
             }
