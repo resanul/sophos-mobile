@@ -127,6 +127,67 @@ object EncryptedStorageManager {
     }
 
     private const val BIOMETRIC_CREDENTIALS_FILE = "sophos_biometric_credentials.enc"
+    private const val ACTIVE_CREDENTIALS_FILE = "sophos_active_credentials.enc"
+
+    fun saveActiveCredentials(userId: String, secret: String): Boolean {
+        val context = appContext ?: return false
+        return try {
+            val payload = "$userId\n$secret"
+            val secretKey = getOrCreateSecretKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            val iv = cipher.iv
+            val cipherText = cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
+            val targetFile = File(context.filesDir, ACTIVE_CREDENTIALS_FILE)
+            val out = ByteArrayOutputStream()
+            out.write(iv)
+            out.write(cipherText)
+            targetFile.writeBytes(out.toByteArray())
+            Log.i(TAG, "Active session credentials saved securely with AES-256-GCM")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save active credentials: ${e.message}", e)
+            false
+        }
+    }
+
+    fun getActiveCredentials(): Pair<String, String>? {
+        val context = appContext ?: return null
+        val targetFile = File(context.filesDir, ACTIVE_CREDENTIALS_FILE)
+        if (!targetFile.exists() || targetFile.length() < (GCM_IV_LENGTH + 16)) {
+            return getBiometricCredentials()
+        }
+        return try {
+            val allBytes = targetFile.readBytes()
+            val iv = allBytes.copyOfRange(0, GCM_IV_LENGTH)
+            val cipherText = allBytes.copyOfRange(GCM_IV_LENGTH, allBytes.size)
+            val secretKey = getOrCreateSecretKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val spec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
+            val decrypted = String(cipher.doFinal(cipherText), Charsets.UTF_8)
+            val parts = decrypted.split("\n", limit = 2)
+            if (parts.size == 2 && parts[0].isNotEmpty() && parts[1].isNotEmpty()) {
+                Pair(parts[0], parts[1])
+            } else {
+                getBiometricCredentials()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read active credentials: ${e.message}", e)
+            getBiometricCredentials()
+        }
+    }
+
+    fun clearActiveCredentials() {
+        val context = appContext ?: return
+        try {
+            val file = File(context.filesDir, ACTIVE_CREDENTIALS_FILE)
+            if (file.exists()) file.delete()
+            Log.i(TAG, "Active credentials cleared")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear active credentials: ${e.message}")
+        }
+    }
 
     fun saveBiometricCredentials(userId: String, secret: String): Boolean {
         val context = appContext ?: return false

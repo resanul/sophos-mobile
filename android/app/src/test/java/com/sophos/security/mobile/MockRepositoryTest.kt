@@ -6,9 +6,15 @@ import com.sophos.security.mobile.core.network.MockSecurityRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 class MockRepositoryTest {
+
+    @Before
+    fun setUp() {
+        MockSecurityRepository.seedTestDataForTesting()
+    }
 
     @Test
     fun testDashboardSummaryCalculation() {
@@ -98,5 +104,12 @@ class MockRepositoryTest {
         val blockedLogs = logs.filter { it.action == com.sophos.security.mobile.core.model.WebAction.BLOCKED }
         assertTrue(blockedLogs.isNotEmpty())
         assertTrue(logs.any { it.domain.contains("facebook.com") })
+    }
+
+    @Test
+    fun testExecuteThreatHuntWeb() {
+        val results = MockSecurityRepository.executeThreatHunt("job-th-tmpl-03")
+        assertTrue(results.isNotEmpty())
+        assertTrue(results.any { it["title"]?.contains("facebook.com") == true })
     }
 }

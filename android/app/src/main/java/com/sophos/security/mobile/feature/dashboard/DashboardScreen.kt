@@ -371,8 +371,31 @@ fun DashboardScreen(
                 }
             }
 
-            items(alerts.take(3)) { alert ->
-                AlertCard(alert = alert, onClick = { onNavigateToAlertDetail(alert.id) })
+            if (alerts.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SecurityGreen, modifier = Modifier.size(22.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("All Endpoints Clear", style = MaterialTheme.typography.titleSmall, color = Color.White)
+                                Text("No active critical alerts detected in your live tenant.", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+                            }
+                        }
+                    }
+                }
+            } else {
+                items(alerts.take(3)) { alert ->
+                    AlertCard(alert = alert, onClick = { onNavigateToAlertDetail(alert.id) })
+                }
             }
 
             item { Spacer(modifier = Modifier.height(24.dp)) }

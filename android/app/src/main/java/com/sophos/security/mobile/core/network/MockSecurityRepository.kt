@@ -60,176 +60,20 @@ object MockSecurityRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Initial endpoints state
-    private val endpoints = MutableStateFlow(
-        listOf(
-            Endpoint(
-                id = "ep-us-prod-01",
-                hostname = "SEC-CORP-DC01",
-                ipAddresses = listOf("10.14.0.5", "192.168.10.5"),
-                os = "Windows Server 2022 Datacenter",
-                health = HealthState.SUSPICIOUS,
-                isolated = false,
-                tamperProtection = true,
-                lastSeenAt = "Just now",
-                isServer = true,
-                agentVersion = "2026.2.1",
-                groupName = "Domain Controllers",
-                online = true
-            ),
-            Endpoint(
-                id = "ep-us-prod-02",
-                hostname = "FIN-WS-4091",
-                ipAddresses = listOf("10.14.2.144"),
-                os = "Windows 11 Enterprise 24H2",
-                health = HealthState.BAD,
-                isolated = true,
-                tamperProtection = true,
-                lastSeenAt = "2 mins ago",
-                isServer = false,
-                agentVersion = "2026.2.0",
-                groupName = "Finance Workstations",
-                online = false
-            ),
-            Endpoint(
-                id = "ep-us-prod-03",
-                hostname = "ENG-UBUNTU-DEV08",
-                ipAddresses = listOf("10.14.5.88"),
-                os = "Ubuntu Linux 24.04 LTS",
-                health = HealthState.GOOD,
-                isolated = false,
-                tamperProtection = true,
-                lastSeenAt = "5 mins ago",
-                isServer = false,
-                agentVersion = "2026.1.4",
-                groupName = "Engineering Workstations",
-                online = true
-            ),
-            Endpoint(
-                id = "ep-us-prod-04",
-                hostname = "APP-K8S-NODE-03",
-                ipAddresses = listOf("10.14.8.21"),
-                os = "Red Hat Enterprise Linux 9.4",
-                health = HealthState.GOOD,
-                isolated = false,
-                tamperProtection = true,
-                lastSeenAt = "1 min ago",
-                isServer = true,
-                agentVersion = "2026.2.0",
-                groupName = "Kubernetes Cluster Nodes",
-                online = true
-            )
-        )
-    )
+    // Live endpoints state (empty by default; populated exclusively via Sophos Central API / decrypted cache)
+    private val endpoints = MutableStateFlow<List<Endpoint>>(emptyList())
 
-    // Initial alerts state
-    private val alerts = MutableStateFlow(
-        listOf(
-            Alert(
-                id = "alt-89102",
-                severity = Severity.CRITICAL,
-                category = "Ransomware / Cryptoguard",
-                description = "CryptoGuard detected and reverted malicious file encryption by process 'vssadmin.exe'",
-                endpointHostname = "FIN-WS-4091",
-                endpointId = "ep-us-prod-02",
-                detectedAt = "12 mins ago",
-                status = AlertStatus.OPEN,
-                product = "Sophos Intercept X",
-                threatName = "Troj/Ransom-J",
-                path = "C:\\Users\\FinanceUser\\AppData\\Local\\Temp\\updater.exe"
-            ),
-            Alert(
-                id = "alt-89103",
-                severity = Severity.HIGH,
-                category = "Credential Theft",
-                description = "LSASS memory dumping attempted via unapproved debug privilege escalation",
-                endpointHostname = "SEC-CORP-DC01",
-                endpointId = "ep-us-prod-01",
-                detectedAt = "24 mins ago",
-                status = AlertStatus.OPEN,
-                product = "Sophos Intercept X with EDR",
-                threatName = "Mimikatz Memory Harvester",
-                path = "C:\\Windows\\System32\\lsass.exe"
-            ),
-            Alert(
-                id = "alt-89104",
-                severity = Severity.MEDIUM,
-                category = "Exploit Prevention",
-                description = "ROP gadget detected in browser child process; payload blocked before execution",
-                endpointHostname = "ENG-UBUNTU-DEV08",
-                endpointId = "ep-us-prod-03",
-                detectedAt = "1 hour ago",
-                status = AlertStatus.ACKNOWLEDGED,
-                product = "Sophos Intercept X",
-                threatName = "Exp/ROP-Chrome",
-                path = "/opt/google/chrome/chrome"
-            )
-        )
-    )
+    // Live alerts state
+    private val alerts = MutableStateFlow<List<Alert>>(emptyList())
 
-    private val detections = MutableStateFlow(
-        listOf(
-            Detection(
-                id = "det-301",
-                severity = Severity.CRITICAL,
-                title = "Suspicious PowerShell In-Memory Assembly Loading",
-                category = "Execution (T1059.001)",
-                targetEndpoint = "FIN-WS-4091",
-                endpointId = "ep-us-prod-02",
-                riskScore = 94,
-                mitreTechniques = listOf("T1059.001", "T1027", "T1003.001"),
-                detectedAt = "15 mins ago",
-                status = "Under Active Investigation",
-                processPath = "powershell.exe -NoP -NonI -W Hidden -Enc SUVY...",
-                sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-            ),
-            Detection(
-                id = "det-302",
-                severity = Severity.HIGH,
-                title = "NTDS.dit Directory Database Shadow Copy Extraction",
-                category = "Credential Access (T1003.003)",
-                targetEndpoint = "SEC-CORP-DC01",
-                endpointId = "ep-us-prod-01",
-                riskScore = 88,
-                mitreTechniques = listOf("T1003.003", "T1490"),
-                detectedAt = "30 mins ago",
-                status = "Pending Escalation",
-                processPath = "ntdsutil.exe \"ac i ntds\" \"ifm\" \"create full C:\\temp\" q q",
-                sha256 = "c5d806a6659f81bb3b6481bb2bb6a9a7a67119ffb264906f376cf9ad0106ea4d"
-            )
-        )
-    )
+    // Live XDR detections state
+    private val detections = MutableStateFlow<List<Detection>>(emptyList())
 
-    private val cases = MutableStateFlow(
-        listOf(
-            XdrCase(
-                id = "case-2026-0042",
-                caseNumber = "XDR-0042",
-                title = "Finance Workstation Ransomware Outbreak Containment",
-                status = CaseStatus.IN_PROGRESS,
-                priority = CasePriority.URGENT,
-                assignee = "Lead SOC Responder (You)",
-                detectionCount = 4,
-                createdAt = "28 mins ago",
-                updatedAt = "5 mins ago",
-                summary = "Cryptoguard telemetry combined with in-memory PowerShell invocation on FIN-WS-4091. Isolation enacted successfully.",
-                impactedEndpoints = listOf("FIN-WS-4091", "SEC-CORP-DC01")
-            ),
-            XdrCase(
-                id = "case-2026-0039",
-                caseNumber = "XDR-0039",
-                title = "Suspicious Domain Controller Replication Sync Probe",
-                status = CaseStatus.NEW,
-                priority = CasePriority.HIGH,
-                assignee = "Unassigned",
-                detectionCount = 2,
-                createdAt = "2 hours ago",
-                updatedAt = "1 hour ago",
-                summary = "Anomalous DCSync RPC calls detected from non-DC subnet against SEC-CORP-DC01.",
-                impactedEndpoints = listOf("SEC-CORP-DC01")
-            )
-        )
-    )
+    // Live cases state
+    private val cases = MutableStateFlow<List<XdrCase>>(emptyList())
+
+    // Live web browsing and web control logs
+    private val webLogs = MutableStateFlow<List<WebActivityLog>>(emptyList())
 
     private val threatHuntTemplates = listOf(
         ThreatHuntTemplate(
@@ -258,157 +102,95 @@ object MockSecurityRepository {
         )
     )
 
-    private val webLogs = MutableStateFlow(
-        listOf(
-            WebActivityLog(
-                id = "web-log-01",
-                username = "corp\\sarah.khan",
-                endpointHostname = "FIN-WS-4091",
-                endpointId = "ep-us-prod-02",
-                isServer = false,
-                domain = "facebook.com",
-                fullUrl = "https://www.facebook.com/login",
-                category = "Social Networking",
-                action = WebAction.BLOCKED,
-                timestamp = "3 mins ago",
-                browser = "Google Chrome",
-                dataTransferred = "1.8 MB",
-                clientIp = "10.14.2.144",
-                policyRule = "Corporate Acceptable Use - Block Social Networks"
-            ),
-            WebActivityLog(
-                id = "web-log-02",
-                username = "dev\\alex.turner",
-                endpointHostname = "ENG-UBUNTU-DEV08",
-                endpointId = "ep-us-prod-03",
-                isServer = false,
-                domain = "chatgpt.com",
-                fullUrl = "https://chatgpt.com",
-                category = "Generative AI",
-                action = WebAction.ALLOWED,
-                timestamp = "8 mins ago",
-                browser = "Mozilla Firefox",
-                dataTransferred = "4.2 MB",
-                clientIp = "10.14.5.88",
-                policyRule = "Productivity Allowed - AI Tools Audit"
-            ),
-            WebActivityLog(
-                id = "web-log-03",
-                username = "finance\\kabir.hassan",
-                endpointHostname = "FIN-WS-3012",
-                endpointId = "ep-us-prod-02",
-                isServer = false,
-                domain = "online-casino-vip.com",
-                fullUrl = "https://online-casino-vip.com/play",
-                category = "Adult & Gambling",
-                action = WebAction.BLOCKED,
-                timestamp = "14 mins ago",
-                browser = "Microsoft Edge",
-                dataTransferred = "340 KB",
-                clientIp = "10.14.2.190",
-                policyRule = "Strict Security - Block High Risk & Gambling"
-            ),
-            WebActivityLog(
-                id = "web-log-04",
-                username = "sales\\rahim.ahmed",
-                endpointHostname = "SALES-LAPTOP-04",
-                endpointId = "ep-us-prod-03",
-                isServer = false,
-                domain = "youtube.com",
-                fullUrl = "https://www.youtube.com/watch?v=tech-review",
-                category = "Streaming Media",
-                action = WebAction.WARNED,
-                timestamp = "22 mins ago",
-                browser = "Google Chrome",
-                dataTransferred = "48.6 MB",
-                clientIp = "10.14.8.99",
-                policyRule = "Bandwidth Optimization - Warn on Video Streaming"
-            ),
-            WebActivityLog(
-                id = "web-log-05",
-                username = "it\\admin.mike",
-                endpointHostname = "SEC-CORP-DC01",
-                endpointId = "ep-us-prod-01",
-                isServer = true,
-                domain = "wetransfer.com",
-                fullUrl = "https://wetransfer.com/upload",
-                category = "Cloud Storage & File Transfer",
-                action = WebAction.WARNED,
-                timestamp = "35 mins ago",
-                browser = "Microsoft Edge",
-                dataTransferred = "124.0 MB",
-                clientIp = "10.14.0.5",
-                policyRule = "DLP Protection - Audit Large Cloud File Transfers"
-            ),
-            WebActivityLog(
-                id = "web-log-06",
-                username = "ops\\tanvir.alam",
-                endpointHostname = "APP-K8S-NODE-03",
-                endpointId = "ep-us-prod-04",
-                isServer = true,
-                domain = "malicious-c2-beacon.top",
-                fullUrl = "http://malicious-c2-beacon.top/sync",
-                category = "Command & Control / Malicious",
-                action = WebAction.BLOCKED,
-                timestamp = "42 mins ago",
-                browser = "curl/8.5.0",
-                dataTransferred = "42 KB",
-                clientIp = "10.14.8.21",
-                policyRule = "Sophos Threat Intelligence - Malicious URL Intercept"
-            ),
-            WebActivityLog(
-                id = "web-log-07",
-                username = "hr\\nusrat.jahan",
-                endpointHostname = "HR-WS-201",
-                endpointId = "ep-us-prod-02",
-                isServer = false,
-                domain = "linkedin.com",
-                fullUrl = "https://www.linkedin.com/jobs",
-                category = "Job Search & Careers",
-                action = WebAction.AUDITED,
-                timestamp = "1 hour ago",
-                browser = "Google Chrome",
-                dataTransferred = "5.1 MB",
-                clientIp = "10.14.3.44",
-                policyRule = "Corporate Monitor - Audit Job Search"
-            ),
-            WebActivityLog(
-                id = "web-log-08",
-                username = "corp\\sarah.khan",
-                endpointHostname = "FIN-WS-4091",
-                endpointId = "ep-us-prod-02",
-                isServer = false,
-                domain = "torrent-download.org",
-                fullUrl = "https://torrent-download.org/search",
-                category = "Peer-to-Peer & Warez",
-                action = WebAction.BLOCKED,
-                timestamp = "1.5 hours ago",
-                browser = "Google Chrome",
-                dataTransferred = "890 KB",
-                clientIp = "10.14.2.144",
-                policyRule = "Network Security - Block P2P and Copyright Violation"
-            )
-        )
-    )
-
     private val dashboardSummary = MutableStateFlow(
         DashboardSummary(
-            totalEndpoints = 4,
-            activeEndpoints = 3,
-            healthyEndpoints = 2,
-            suspiciousEndpoints = 1,
-            badEndpoints = 1,
-            isolatedEndpoints = 1,
-            activeCriticalAlerts = 1,
-            activeHighAlerts = 1,
-            openCases = 2,
-            recentDetectionsCount = 2,
+            totalEndpoints = 0,
+            activeEndpoints = 0,
+            healthyEndpoints = 0,
+            suspiciousEndpoints = 0,
+            badEndpoints = 0,
+            isolatedEndpoints = 0,
+            activeCriticalAlerts = 0,
+            activeHighAlerts = 0,
+            openCases = 0,
+            recentDetectionsCount = 0,
             syncFreshnessTimestamp = "Awaiting login...",
             isLiveDataSource = false,
-            tenantName = "Enterprise Security Operations Tenant",
+            tenantName = "Sophos Central Tenant",
             dataRegion = "Sophos Central Cloud"
         )
     )
+
+    fun seedTestDataForTesting() {
+        endpoints.value = listOf(
+            Endpoint(
+                id = "test-ep-01",
+                hostname = "SEC-TEST-DC01",
+                ipAddresses = listOf("10.14.0.5"),
+                os = "Windows Server 2022",
+                health = HealthState.SUSPICIOUS,
+                isolated = false,
+                tamperProtection = true,
+                lastSeenAt = "Just now",
+                isServer = true,
+                online = true
+            ),
+            Endpoint(
+                id = "test-ep-02",
+                hostname = "FIN-TEST-WS01",
+                ipAddresses = listOf("10.14.2.144"),
+                os = "Windows 11",
+                health = HealthState.GOOD,
+                isolated = false,
+                tamperProtection = true,
+                lastSeenAt = "Just now",
+                isServer = false,
+                online = true
+            )
+        )
+        cases.value = listOf(
+            XdrCase(
+                id = "case-test-01",
+                caseNumber = "XDR-TEST-01",
+                title = "Test XDR Incident",
+                status = CaseStatus.NEW,
+                priority = CasePriority.HIGH,
+                assignee = "Lead SOC Responder",
+                detectionCount = 1,
+                createdAt = "Just now",
+                updatedAt = "Just now",
+                summary = "Unit test case"
+            )
+        )
+        webLogs.value = listOf(
+            WebActivityLog(
+                id = "web-test-01",
+                username = "corp\\test.user",
+                endpointHostname = "FIN-TEST-WS01",
+                endpointId = "test-ep-02",
+                domain = "facebook.com",
+                fullUrl = "https://facebook.com",
+                category = "Social Networking",
+                action = WebAction.BLOCKED,
+                timestamp = "Just now"
+            )
+        )
+        val epList = endpoints.value
+        dashboardSummary.value = DashboardSummary(
+            totalEndpoints = epList.size,
+            activeEndpoints = epList.count { it.online },
+            healthyEndpoints = epList.count { it.health == HealthState.GOOD && !it.isolated },
+            suspiciousEndpoints = epList.count { it.health == HealthState.SUSPICIOUS },
+            badEndpoints = epList.count { it.health == HealthState.BAD },
+            isolatedEndpoints = epList.count { it.isolated },
+            activeCriticalAlerts = 0,
+            activeHighAlerts = 0,
+            openCases = 1,
+            recentDetectionsCount = 0,
+            syncFreshnessTimestamp = "Test",
+            isLiveDataSource = true
+        )
+    }
 
     init {
         if (clientId.isNotBlank() && clientSecret.isNotBlank()) {
@@ -429,34 +211,72 @@ object MockSecurityRepository {
     fun initStorage(context: Context) {
         EncryptedStorageManager.init(context)
         loadEncryptedCache()
+
+        // Auto-authenticate with encrypted credentials to stream 100% fresh live data
+        val activeCreds = EncryptedStorageManager.getActiveCredentials()
+        if (activeCreds != null && activeCreds.first.isNotBlank() && activeCreds.second.isNotBlank()) {
+            clientId = activeCreds.first
+            clientSecret = activeCreds.second
+            isLoggedIn = true
+            repositoryScope.launch {
+                syncDirectFromSophosCentral()
+            }
+        }
     }
 
     fun loadEncryptedCache() {
         try {
             val decryptedJson = EncryptedStorageManager.readAndDecrypt() ?: return
             val cached = json.decodeFromString<SophosCachedData>(decryptedJson)
-            if (cached.endpoints.isNotEmpty()) {
-                endpoints.value = cached.endpoints
+
+            // Strip any legacy mock fixtures so only genuine live tenant records remain
+            val cleanEndpoints = cached.endpoints.filterNot {
+                it.id.startsWith("ep-us-prod") ||
+                it.hostname in listOf("SEC-CORP-DC01", "FIN-WS-4091", "ENG-UBUNTU-DEV08", "APP-K8S-NODE-03")
             }
-            if (cached.alerts.isNotEmpty()) {
-                alerts.value = cached.alerts
-            }
-            if (cached.webLogs.isNotEmpty()) {
-                webLogs.value = cached.webLogs
-            }
-            if (cached.summary != null) {
-                val activeCount = if (cached.summary.activeEndpoints > 0) cached.summary.activeEndpoints else cached.endpoints.count { it.online }
-                dashboardSummary.value = cached.summary.copy(
-                    activeEndpoints = activeCount,
-                    syncFreshnessTimestamp = "Decrypted Local Cache",
-                    isLiveDataSource = true
-                )
-            }
+            val cleanAlerts = cached.alerts.filterNot { it.id.startsWith("alt-891") }
+            val cleanWebLogs = cached.webLogs.filterNot { it.id.startsWith("web-log-0") }
+            val cleanCases = cached.cases.filterNot { it.id.startsWith("case-2026-00") }
+            val cleanDetections = cached.detections.filterNot { it.id.startsWith("det-30") }
+
+            endpoints.value = cleanEndpoints
+            alerts.value = cleanAlerts
+            webLogs.value = cleanWebLogs
+            cases.value = cleanCases
+            detections.value = cleanDetections
+
+            val healthyCount = cleanEndpoints.count { it.health == HealthState.GOOD && !it.isolated }
+            val suspCount = cleanEndpoints.count { it.health == HealthState.SUSPICIOUS }
+            val badCount = cleanEndpoints.count { it.health == HealthState.BAD }
+            val isoCount = cleanEndpoints.count { it.isolated }
+            val activeCount = cleanEndpoints.count { it.online }
+            val critAlerts = cleanAlerts.count { it.severity == Severity.CRITICAL && it.status == AlertStatus.OPEN }
+            val highAlerts = cleanAlerts.count { it.severity == Severity.HIGH && it.status == AlertStatus.OPEN }
+
+            dashboardSummary.value = DashboardSummary(
+                totalEndpoints = cleanEndpoints.size,
+                activeEndpoints = activeCount,
+                healthyEndpoints = healthyCount,
+                suspiciousEndpoints = suspCount,
+                badEndpoints = badCount,
+                isolatedEndpoints = isoCount,
+                activeCriticalAlerts = critAlerts,
+                activeHighAlerts = highAlerts,
+                openCases = cleanCases.count { it.status != CaseStatus.CLOSED },
+                recentDetectionsCount = cleanDetections.size,
+                syncFreshnessTimestamp = "Decrypted Local Cache",
+                isLiveDataSource = cleanEndpoints.isNotEmpty(),
+                tenantName = cached.summary?.tenantName ?: "Sophos Central Production Tenant",
+                dataRegion = (if (cached.dataRegionUrl.isNotEmpty()) cached.dataRegionUrl else dataRegionUrl).replace("https://", "")
+            )
+
             if (cached.tenantId.isNotEmpty()) tenantId = cached.tenantId
             if (cached.dataRegionUrl.isNotEmpty()) dataRegionUrl = cached.dataRegionUrl
-            isLiveConnected = cached.endpoints.isNotEmpty()
-            lastSyncStatus = "Decrypted Local Cache (${endpoints.value.size} Endpoints, ${alerts.value.size} Alerts)"
-            Log.i(TAG, "Decrypted local cache loaded: ${endpoints.value.size} endpoints, ${alerts.value.size} alerts, ${webLogs.value.size} web logs")
+            isLiveConnected = cleanEndpoints.isNotEmpty()
+            lastSyncStatus = "Decrypted Local Cache (${cleanEndpoints.size} Endpoints, ${cleanAlerts.size} Alerts)"
+            Log.i(TAG, "Decrypted clean cache loaded: ${cleanEndpoints.size} endpoints, ${cleanAlerts.size} alerts, ${cleanWebLogs.size} web logs")
+
+            saveEncryptedCache()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load decrypted local cache: ${e.message}")
         }
@@ -468,6 +288,8 @@ object MockSecurityRepository {
                 endpoints = endpoints.value,
                 alerts = alerts.value,
                 webLogs = webLogs.value,
+                detections = detections.value,
+                cases = cases.value,
                 summary = dashboardSummary.value,
                 tenantId = tenantId,
                 dataRegionUrl = dataRegionUrl,
@@ -530,6 +352,9 @@ object MockSecurityRepository {
             tokenExpiryMs = System.currentTimeMillis() + ((expiresIn - 60).coerceAtLeast(60) * 1000L)
             isLoggedIn = true
 
+            // Persist encrypted active credentials for auto-reconnection
+            EncryptedStorageManager.saveActiveCredentials(trimmedUser, trimmedSecret)
+
             // Auto-discover tenant ID and data region URL via /whoami
             try {
                 val whoamiReq = Request.Builder()
@@ -568,6 +393,7 @@ object MockSecurityRepository {
     }
 
     fun logout() {
+        EncryptedStorageManager.clearActiveCredentials()
         clientId = ""
         clientSecret = ""
         tenantId = ""
@@ -887,7 +713,192 @@ object MockSecurityRepository {
             Log.e(TAG, "Exception fetching alerts: ${e.message}", e)
         }
 
-        // 3. Update Dashboard Summary
+        // 3. Direct SIEM Events Fetch for Live Web Control and Security Detections
+        try {
+            lastSyncStatus = "Loading live web control & SIEM telemetry..."
+            val eventReq = Request.Builder()
+                .url("$dataRegionUrl/siem/v1/events?limit=500")
+                .header("Authorization", "Bearer $token")
+                .header("X-Tenant-ID", tenantId)
+                .get()
+                .build()
+
+            val liveWebLogs = mutableListOf<WebActivityLog>()
+            val liveDetections = mutableListOf<Detection>()
+
+            okHttpClient.newCall(eventReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: "{}"
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+
+                    for (elem in items) {
+                        val evObj = elem.jsonObject
+                        val id = evObj["id"]?.jsonPrimitive?.contentOrNull ?: java.util.UUID.randomUUID().toString()
+                        val type = evObj["type"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val group = evObj["group"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val location = evObj["location"]?.jsonPrimitive?.contentOrNull
+                            ?: evObj["endpoint"]?.jsonObject?.get("hostname")?.jsonPrimitive?.contentOrNull
+                            ?: "Managed Endpoint"
+                        val epId = evObj["endpoint_id"]?.jsonPrimitive?.contentOrNull
+                            ?: evObj["endpoint"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                            ?: ""
+                        val user = evObj["user"]?.jsonPrimitive?.contentOrNull ?: "system"
+                        val whenTime = evObj["when"]?.jsonPrimitive?.contentOrNull
+                            ?: evObj["created_at"]?.jsonPrimitive?.contentOrNull
+                            ?: "Recently"
+                        val description = evObj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val name = evObj["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val rawUrl = evObj["url"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val appName = evObj["app_name"]?.jsonPrimitive?.contentOrNull ?: "Web Browser"
+                        val isServer = evObj["endpoint_type"]?.jsonPrimitive?.contentOrNull?.equals("server", ignoreCase = true) ?: false
+
+                        // Check if event relates to Web Filtering / Web Control / DNS
+                        if (group.equals("WEB", ignoreCase = true) ||
+                            type.contains("Web", ignoreCase = true) ||
+                            rawUrl.isNotEmpty() ||
+                            description.contains("http", ignoreCase = true) ||
+                            description.contains("url", ignoreCase = true) ||
+                            name.contains("Web", ignoreCase = true)
+                        ) {
+                            val targetUrl = if (rawUrl.isNotEmpty()) rawUrl else extractUrlFromText(description.ifEmpty { name })
+                            val domain = extractDomain(targetUrl)
+                            val action = when {
+                                type.contains("Violation", ignoreCase = true) || type.contains("Block", ignoreCase = true) -> WebAction.BLOCKED
+                                type.contains("Warn", ignoreCase = true) -> WebAction.WARNED
+                                type.contains("Audit", ignoreCase = true) -> WebAction.AUDITED
+                                else -> WebAction.ALLOWED
+                            }
+                            val category = evObj["category"]?.jsonPrimitive?.contentOrNull
+                                ?: if (group.isNotEmpty()) group else "Web Filtering"
+
+                            liveWebLogs.add(
+                                WebActivityLog(
+                                    id = id,
+                                    username = user,
+                                    endpointHostname = location,
+                                    endpointId = epId,
+                                    isServer = isServer,
+                                    domain = domain,
+                                    fullUrl = targetUrl,
+                                    category = category,
+                                    action = action,
+                                    timestamp = formatIsoTimestamp(whenTime),
+                                    browser = appName,
+                                    dataTransferred = "—",
+                                    clientIp = evObj["endpoint_ip"]?.jsonPrimitive?.contentOrNull ?: "—",
+                                    policyRule = description.ifEmpty { name.ifEmpty { "Sophos Web Filtering Policy" } }
+                                )
+                            )
+                        }
+
+                        // Check if event is an XDR Detection
+                        if (group.uppercase() in listOf("MALWARE", "THREAT", "EXPLOIT", "APPLICATION_CONTROL", "SECURITY") ||
+                            type.contains("Threat", ignoreCase = true) ||
+                            type.contains("Malware", ignoreCase = true)
+                        ) {
+                            val sevStr = evObj["severity"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
+                            val sev = when (sevStr) {
+                                "CRITICAL" -> Severity.CRITICAL
+                                "HIGH" -> Severity.HIGH
+                                "LOW" -> Severity.LOW
+                                "INFO" -> Severity.INFO
+                                else -> Severity.MEDIUM
+                            }
+                            liveDetections.add(
+                                Detection(
+                                    id = id,
+                                    severity = sev,
+                                    title = name.ifEmpty { description.ifEmpty { "Security Incident ($type)" } },
+                                    category = group.ifEmpty { type },
+                                    targetEndpoint = location,
+                                    endpointId = epId,
+                                    riskScore = when (sev) {
+                                        Severity.CRITICAL -> 92
+                                        Severity.HIGH -> 80
+                                        Severity.MEDIUM -> 55
+                                        Severity.LOW -> 30
+                                        Severity.INFO -> 10
+                                    },
+                                    mitreTechniques = emptyList(),
+                                    detectedAt = formatIsoTimestamp(whenTime),
+                                    status = "Active Telemetry",
+                                    processPath = appName,
+                                    sha256 = evObj["sha256"]?.jsonPrimitive?.contentOrNull ?: ""
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            webLogs.value = liveWebLogs
+            detections.value = liveDetections
+        } catch (e: Exception) {
+            Log.e(TAG, "SIEM events fetch error: ${e.message}")
+        }
+
+        // 4. Live Cases Fetch
+        try {
+            val caseReq = Request.Builder()
+                .url("$dataRegionUrl/cases/v1/cases")
+                .header("Authorization", "Bearer $token")
+                .header("X-Tenant-ID", tenantId)
+                .get()
+                .build()
+            okHttpClient.newCall(caseReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: "{}"
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+                    val liveCases = mutableListOf<XdrCase>()
+                    for (elem in items) {
+                        val cObj = elem.jsonObject
+                        val id = cObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val caseNumber = cObj["caseNumber"]?.jsonPrimitive?.contentOrNull ?: "CASE-${id.take(6)}"
+                        val title = cObj["title"]?.jsonPrimitive?.contentOrNull ?: "Security Case"
+                        val statusStr = cObj["status"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "NEW"
+                        val status = when (statusStr) {
+                            "IN_PROGRESS" -> CaseStatus.IN_PROGRESS
+                            "CONTAINED" -> CaseStatus.CONTAINED
+                            "CLOSED" -> CaseStatus.CLOSED
+                            else -> CaseStatus.NEW
+                        }
+                        val prioStr = cObj["priority"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
+                        val priority = when (prioStr) {
+                            "URGENT" -> CasePriority.URGENT
+                            "HIGH" -> CasePriority.HIGH
+                            "LOW" -> CasePriority.LOW
+                            else -> CasePriority.MEDIUM
+                        }
+                        val assignee = cObj["assignee"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Unassigned"
+                        val createdAt = cObj["createdAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                        val updatedAt = cObj["updatedAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                        val summary = cObj["summary"]?.jsonPrimitive?.contentOrNull ?: ""
+                        liveCases.add(
+                            XdrCase(
+                                id = id,
+                                caseNumber = caseNumber,
+                                title = title,
+                                status = status,
+                                priority = priority,
+                                assignee = assignee,
+                                detectionCount = cObj["detectionCount"]?.jsonPrimitive?.intOrNull ?: 0,
+                                createdAt = formatIsoTimestamp(createdAt),
+                                updatedAt = formatIsoTimestamp(updatedAt),
+                                summary = summary
+                            )
+                        )
+                    }
+                    cases.value = liveCases
+                } else {
+                    cases.value = emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            cases.value = emptyList()
+        }
+
+        // 5. Update Dashboard Summary from 100% Live Telemetry
         val epList = endpoints.value
         val altList = alerts.value
         val caseList = cases.value
@@ -923,7 +934,7 @@ object MockSecurityRepository {
         )
 
         lastSyncStatus = if (success) {
-            "Direct Cloud Connected (${epList.size} Endpoints, ${altList.size} Alerts)"
+            "Direct Cloud Connected (${epList.size} Endpoints, ${altList.size} Alerts, ${webLogs.value.size} Web Logs)"
         } else {
             "Direct connection finished with fallback"
         }
@@ -983,5 +994,109 @@ object MockSecurityRepository {
             if (it.id == id) it.copy(status = newStatus) else it
         }
         return true
+    }
+
+    fun executeThreatHunt(jobId: String): List<Map<String, String>> {
+        val results = mutableListOf<Map<String, String>>()
+        when (jobId) {
+            "job-th-tmpl-03" -> {
+                for (log in webLogs.value) {
+                    results.add(
+                        mapOf(
+                            "header" to "Host: ${log.endpointHostname} | User: ${log.username} | Time: ${log.timestamp}",
+                            "title" to "Domain: ${log.domain} (${log.policyRule})",
+                            "detail" to "Enforced Action: ${log.action} | Category: ${log.category} | Browser: ${log.browser}",
+                            "severity" to if (log.action == WebAction.BLOCKED) "CRITICAL" else if (log.action == WebAction.WARNED) "HIGH" else "INFO"
+                        )
+                    )
+                }
+            }
+            "job-th-tmpl-01" -> {
+                val currentAlerts = alerts.value.filter {
+                    it.category.contains("Exploit", true) ||
+                    it.category.contains("Process", true) ||
+                    it.category.contains("Malware", true) ||
+                    it.threatName.contains("certutil", true) ||
+                    it.threatName.contains("mshta", true)
+                }
+                for (alert in currentAlerts) {
+                    results.add(
+                        mapOf(
+                            "header" to "Host: ${alert.endpointHostname} | Time: ${alert.detectedAt}",
+                            "title" to "Threat: ${alert.threatName} (${alert.category})",
+                            "detail" to "Path: ${alert.path.ifEmpty { alert.description }}",
+                            "severity" to alert.severity.name
+                        )
+                    )
+                }
+            }
+            "job-th-tmpl-02" -> {
+                val currentAlerts = alerts.value.filter {
+                    it.category.contains("Credential", true) ||
+                    it.category.contains("Kerberos", true) ||
+                    it.description.contains("ticket", true)
+                }
+                for (alert in currentAlerts) {
+                    results.add(
+                        mapOf(
+                            "header" to "Host: ${alert.endpointHostname} | Time: ${alert.detectedAt}",
+                            "title" to "Threat: ${alert.threatName} (${alert.category})",
+                            "detail" to alert.description,
+                            "severity" to alert.severity.name
+                        )
+                    )
+                }
+            }
+            else -> {
+                for (det in detections.value) {
+                    results.add(
+                        mapOf(
+                            "header" to "Host: ${det.targetEndpoint} | Time: ${det.detectedAt}",
+                            "title" to det.title,
+                            "detail" to "Risk: ${det.riskScore} | Path: ${det.processPath}",
+                            "severity" to det.severity.name
+                        )
+                    )
+                }
+            }
+        }
+        return results
+    }
+
+    private fun extractDomain(urlOrText: String): String {
+        return try {
+            val clean = urlOrText.trim()
+            if (clean.isBlank()) return "Unknown Domain"
+            val uri = if (clean.startsWith("http://") || clean.startsWith("https://")) {
+                java.net.URI(clean)
+            } else {
+                java.net.URI("http://$clean")
+            }
+            uri.host ?: clean.substringBefore("/").substringBefore(":")
+        } catch (e: Exception) {
+            urlOrText.substringBefore("/").substringBefore(":")
+        }
+    }
+
+    private fun extractUrlFromText(text: String): String {
+        val match = Regex("""https?://[^\s"'>]+""").find(text)
+        return match?.value ?: text.trim()
+    }
+
+    private fun formatIsoTimestamp(isoString: String): String {
+        if (isoString.isBlank()) return "Recently"
+        return try {
+            val instant = java.time.Instant.parse(isoString)
+            val now = java.time.Instant.now()
+            val diffSeconds = java.time.Duration.between(instant, now).seconds
+            when {
+                diffSeconds < 60 -> "Just now"
+                diffSeconds < 3600 -> "${diffSeconds / 60} mins ago"
+                diffSeconds < 86400 -> "${diffSeconds / 3600} hours ago"
+                else -> "${diffSeconds / 86400} days ago"
+            }
+        } catch (e: Exception) {
+            isoString
+        }
     }
 }

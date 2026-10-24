@@ -204,6 +204,8 @@ data class SophosCachedData(
     val endpoints: List<Endpoint> = emptyList(),
     val alerts: List<Alert> = emptyList(),
     val webLogs: List<WebActivityLog> = emptyList(),
+    val detections: List<Detection> = emptyList(),
+    val cases: List<XdrCase> = emptyList(),
     val summary: DashboardSummary? = null,
     val tenantId: String = "",
     val dataRegionUrl: String = "",

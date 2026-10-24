@@ -56,14 +56,21 @@ fun DetectionsListScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(filtered) { det ->
-                    DetectionCard(detection = det, onClick = { onNavigateToDetectionDetail(det.id) })
+            if (filtered.isEmpty()) {
+                EmptyStateView(
+                    title = "No Detections Found",
+                    message = "No active XDR threat detections recorded in this tenant."
+                )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(filtered) { det ->
+                        DetectionCard(detection = det, onClick = { onNavigateToDetectionDetail(det.id) })
+                    }
+                    item { Spacer(modifier = Modifier.height(24.dp)) }
                 }
-                item { Spacer(modifier = Modifier.height(24.dp)) }
             }
         }
     }
