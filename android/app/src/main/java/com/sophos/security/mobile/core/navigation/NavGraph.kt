@@ -47,25 +47,64 @@ fun SophosNavGraph(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val isTopLevelDestination = bottomNavItems.any { it.route == currentRoute }
+    // Show universal bottom navigation bar on all authenticated screens
+    val isAuthScreen = currentRoute in listOf(
+        Screen.Splash.route,
+        Screen.Login.route,
+        Screen.Mfa.route,
+        Screen.Biometric.route
+    )
+    val showBottomBar = !isAuthScreen && currentRoute != null
 
     Scaffold(
         bottomBar = {
-            if (isTopLevelDestination) {
+            if (showBottomBar) {
                 NavigationBar(
                     containerColor = DarkSurface,
                     tonalElevation = 8.dp
                 ) {
                     bottomNavItems.forEach { item ->
-                        val selected = currentRoute == item.route
+                        val selected = when (item.route) {
+                            Screen.Dashboard.route -> currentRoute == Screen.Dashboard.route || currentRoute in listOf(
+                                Screen.Detections.route,
+                                Screen.ThreatHunting.route,
+                                Screen.Diagnostics.route
+                            ) || currentRoute?.startsWith("detection_detail") == true
+                            Screen.Alerts.route -> currentRoute == Screen.Alerts.route || currentRoute?.startsWith("alert_detail") == true
+                            Screen.Endpoints.route -> currentRoute == Screen.Endpoints.route || currentRoute?.startsWith("endpoint_detail") == true
+                            Screen.Cases.route -> currentRoute == Screen.Cases.route || currentRoute?.startsWith("case_detail") == true
+                            Screen.More.route -> currentRoute == Screen.More.route || currentRoute in listOf(
+                                Screen.Notifications.route,
+                                Screen.GlobalSearch.route,
+                                Screen.SavedViews.route,
+                                Screen.AuditHistory.route,
+                                Screen.ServiceCatalog.route,
+                                Screen.UserProfile.route,
+                                Screen.Settings.route,
+                                Screen.RecoveryState.route
+                            )
+                            else -> currentRoute == item.route
+                        }
+
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
                                 if (currentRoute != item.route) {
-                                    navController.navigate(item.route) {
-                                        popUpTo(Screen.Dashboard.route) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
+                                    if (item.route == Screen.Dashboard.route) {
+                                        // Universal Home action: pop back to Dashboard from any page or subpage
+                                        val popped = navController.popBackStack(Screen.Dashboard.route, inclusive = false)
+                                        if (!popped) {
+                                            navController.navigate(Screen.Dashboard.route) {
+                                                popUpTo(0) { inclusive = false }
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    } else {
+                                        navController.navigate(item.route) {
+                                            popUpTo(Screen.Dashboard.route) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
                                     }
                                 }
                             },

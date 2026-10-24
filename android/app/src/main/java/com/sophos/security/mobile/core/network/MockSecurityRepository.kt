@@ -69,7 +69,8 @@ object MockSecurityRepository {
                 lastSeenAt = "Just now",
                 isServer = true,
                 agentVersion = "2026.2.1",
-                groupName = "Domain Controllers"
+                groupName = "Domain Controllers",
+                online = true
             ),
             Endpoint(
                 id = "ep-us-prod-02",
@@ -82,7 +83,8 @@ object MockSecurityRepository {
                 lastSeenAt = "2 mins ago",
                 isServer = false,
                 agentVersion = "2026.2.0",
-                groupName = "Finance Workstations"
+                groupName = "Finance Workstations",
+                online = false
             ),
             Endpoint(
                 id = "ep-us-prod-03",
@@ -95,7 +97,8 @@ object MockSecurityRepository {
                 lastSeenAt = "5 mins ago",
                 isServer = false,
                 agentVersion = "2026.1.4",
-                groupName = "Engineering Workstations"
+                groupName = "Engineering Workstations",
+                online = true
             ),
             Endpoint(
                 id = "ep-us-prod-04",
@@ -108,7 +111,8 @@ object MockSecurityRepository {
                 lastSeenAt = "1 min ago",
                 isServer = true,
                 agentVersion = "2026.2.0",
-                groupName = "Kubernetes Cluster Nodes"
+                groupName = "Kubernetes Cluster Nodes",
+                online = true
             )
         )
     )
@@ -244,6 +248,7 @@ object MockSecurityRepository {
     private val dashboardSummary = MutableStateFlow(
         DashboardSummary(
             totalEndpoints = 4,
+            activeEndpoints = 3,
             healthyEndpoints = 2,
             suspiciousEndpoints = 1,
             badEndpoints = 1,
@@ -290,7 +295,9 @@ object MockSecurityRepository {
                 alerts.value = cached.alerts
             }
             if (cached.summary != null) {
+                val activeCount = if (cached.summary.activeEndpoints > 0) cached.summary.activeEndpoints else cached.endpoints.count { it.online }
                 dashboardSummary.value = cached.summary.copy(
+                    activeEndpoints = activeCount,
                     syncFreshnessTimestamp = "Decrypted Local Cache",
                     isLiveDataSource = true
                 )
@@ -586,6 +593,7 @@ object MockSecurityRepository {
                                 ?: (epObj["os"]?.jsonObject?.get("isServer")?.jsonPrimitive?.booleanOrNull ?: false)
                             val agentVersion = epObj["coreAgentVersion"]?.jsonPrimitive?.contentOrNull ?: "2026.2"
                             val groupName = epObj["group"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Enterprise Core"
+                            val online = epObj["online"]?.jsonPrimitive?.booleanOrNull ?: false
 
                             allEndpoints.add(
                                 Endpoint(
@@ -599,7 +607,8 @@ object MockSecurityRepository {
                                     lastSeenAt = lastSeen,
                                     isServer = isServer,
                                     agentVersion = agentVersion,
-                                    groupName = groupName
+                                    groupName = groupName,
+                                    online = online
                                 )
                             )
                         }
@@ -737,6 +746,7 @@ object MockSecurityRepository {
         val suspCount = epList.count { it.health == HealthState.SUSPICIOUS }
         val badCount = epList.count { it.health == HealthState.BAD }
         val isoCount = epList.count { it.isolated }
+        val activeCount = epList.count { it.online }
 
         val critAlerts = altList.count { it.severity == Severity.CRITICAL && it.status == AlertStatus.OPEN }
         val highAlerts = altList.count { it.severity == Severity.HIGH && it.status == AlertStatus.OPEN }
@@ -746,6 +756,7 @@ object MockSecurityRepository {
 
         dashboardSummary.value = DashboardSummary(
             totalEndpoints = epList.size,
+            activeEndpoints = activeCount,
             healthyEndpoints = healthyCount,
             suspiciousEndpoints = suspCount,
             badEndpoints = badCount,

@@ -285,6 +285,13 @@ fun EndpointCard(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(if (endpoint.online) SecurityGreen else Color.Gray.copy(alpha = 0.5f))
+                    )
                 }
                 StatusIndicator(health = endpoint.health, isIsolated = endpoint.isolated)
             }

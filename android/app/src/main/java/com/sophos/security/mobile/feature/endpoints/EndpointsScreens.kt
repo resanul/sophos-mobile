@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,14 +24,29 @@ import com.sophos.security.mobile.core.designsystem.theme.*
 import com.sophos.security.mobile.core.model.*
 import com.sophos.security.mobile.core.network.MockSecurityRepository
 
+enum class EndpointSortField(val label: String) {
+    HOSTNAME("Hostname"),
+    ONLINE("Active / Online"),
+    HEALTH("Health State"),
+    LAST_SEEN("Last Seen")
+}
+
 @Composable
 fun EndpointsListScreen(
     onNavigateToEndpointDetail: (String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterType by remember { mutableStateOf("ALL") } // ALL, SERVERS, WORKSTATIONS, ISOLATED
+    var sortField by remember { mutableStateOf(EndpointSortField.HOSTNAME) }
+    var isAscending by remember { mutableStateOf(true) }
+    var sortDropdownOpen by remember { mutableStateOf(false) }
+
     val endpoints by MockSecurityRepository.getEndpoints().collectAsState(initial = emptyList())
     val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
+
+    val serverCount = remember(endpoints) { endpoints.count { it.isServer } }
+    val workstationCount = remember(endpoints) { endpoints.count { !it.isServer } }
+    val isolatedCount = remember(endpoints) { endpoints.count { it.isolated } }
 
     val filteredEndpoints = endpoints.filter { ep ->
         val matchesQuery = searchQuery.isEmpty() ||
@@ -46,11 +62,32 @@ fun EndpointsListScreen(
         matchesQuery && matchesType
     }
 
+    val sortedEndpoints = remember(filteredEndpoints, sortField, isAscending) {
+        val comparator: Comparator<Endpoint> = when (sortField) {
+            EndpointSortField.HOSTNAME -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.hostname }
+            EndpointSortField.ONLINE -> compareByDescending { it.online }
+            EndpointSortField.HEALTH -> compareBy {
+                when (it.health) {
+                    HealthState.BAD -> 0
+                    HealthState.SUSPICIOUS -> 1
+                    HealthState.UNKNOWN -> 2
+                    HealthState.GOOD -> 3
+                }
+            }
+            EndpointSortField.LAST_SEEN -> compareByDescending { it.lastSeenAt }
+        }
+        if (isAscending) {
+            filteredEndpoints.sortedWith(comparator)
+        } else {
+            filteredEndpoints.sortedWith(comparator.reversed())
+        }
+    }
+
     Scaffold(
         topBar = {
             SecurityTopBar(
                 title = "Endpoint Inventory",
-                subtitle = if (isSyncing) "${filteredEndpoints.size} devices (fetching live...)" else "${filteredEndpoints.size} managed devices"
+                subtitle = if (isSyncing) "${sortedEndpoints.size} devices (fetching live...)" else "${sortedEndpoints.size} managed devices"
             )
         },
         containerColor = DarkBackground
@@ -92,23 +129,98 @@ fun EndpointsListScreen(
                 FilterChip(
                     selected = filterType == "SERVERS",
                     onClick = { filterType = "SERVERS" },
-                    label = { Text("SERVERS") }
+                    label = { Text("SERVERS ($serverCount)") }
                 )
                 FilterChip(
                     selected = filterType == "WORKSTATIONS",
                     onClick = { filterType = "WORKSTATIONS" },
-                    label = { Text("WORKSTATIONS") }
+                    label = { Text("WORKSTATIONS ($workstationCount)") }
                 )
                 FilterChip(
                     selected = filterType == "ISOLATED",
                     onClick = { filterType = "ISOLATED" },
-                    label = { Text("ISOLATED") }
+                    label = { Text("ISOLATED ($isolatedCount)") }
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            if (filteredEndpoints.isEmpty()) {
+            // Sort & Order Controls Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${sortedEndpoints.size} endpoints listed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DarkOnSurfaceMuted
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box {
+                        OutlinedButton(
+                            onClick = { sortDropdownOpen = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort By",
+                                tint = SecurityGreen,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = sortField.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = sortDropdownOpen,
+                            onDismissRequest = { sortDropdownOpen = false }
+                        ) {
+                            EndpointSortField.values().forEach { field ->
+                                DropdownMenuItem(
+                                    text = { Text(field.label) },
+                                    leadingIcon = if (sortField == field) {
+                                        { Icon(Icons.Default.Check, contentDescription = null, tint = SecurityGreen) }
+                                    } else null,
+                                    onClick = {
+                                        sortField = field
+                                        sortDropdownOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    IconButton(
+                        onClick = { isAscending = !isAscending },
+                        modifier = Modifier
+                            .size(34.dp)
+                            .background(DarkSurfaceVariant, RoundedCornerShape(8.dp))
+                            .border(0.5.dp, DarkBorder, RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = if (isAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                            contentDescription = if (isAscending) "Ascending (Tap for Descending)" else "Descending (Tap for Ascending)",
+                            tint = SecurityGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (sortedEndpoints.isEmpty()) {
                 EmptyStateView(
                     title = "No Endpoints Matching Filter",
                     message = "Adjust search terms or clear filters to view devices."
@@ -118,7 +230,7 @@ fun EndpointsListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(filteredEndpoints, key = { it.id }) { ep ->
+                    items(sortedEndpoints, key = { it.id }) { ep ->
                         EndpointCard(
                             endpoint = ep,
                             onClick = { onNavigateToEndpointDetail(ep.id) }

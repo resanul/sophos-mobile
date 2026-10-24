@@ -54,7 +54,8 @@ data class Endpoint(
     val lastSeenAt: String,
     val isServer: Boolean = false,
     val agentVersion: String = "2026.2.0",
-    val groupName: String = "Enterprise Core"
+    val groupName: String = "Enterprise Core",
+    val online: Boolean = false
 )
 
 @Serializable
@@ -160,6 +161,7 @@ data class CapabilityService(
 @Serializable
 data class DashboardSummary(
     val totalEndpoints: Int,
+    val activeEndpoints: Int = 0,
     val healthyEndpoints: Int,
     val suspiciousEndpoints: Int,
     val badEndpoints: Int,

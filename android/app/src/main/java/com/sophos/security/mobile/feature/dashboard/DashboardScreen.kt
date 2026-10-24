@@ -144,7 +144,7 @@ fun DashboardScreen(
                     MetricCard(
                         title = "Endpoints",
                         value = summary.totalEndpoints.toString(),
-                        subtitle = "${summary.badEndpoints} Unhealthy / ${summary.isolatedEndpoints} Isolated",
+                        subtitle = "${summary.activeEndpoints} Active Online • ${summary.badEndpoints} Bad",
                         icon = Icons.Default.Devices,
                         accentColor = SecurityGreen,
                         onClick = onNavigateToEndpoints,
@@ -193,6 +193,91 @@ fun DashboardScreen(
                         Icon(Icons.Default.Security, contentDescription = null, tint = SeverityCritical, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Isolation Hub", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            // Active & Online Devices Status Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)),
+                    onClick = onNavigateToEndpoints
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(SecurityGreen)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "ACTIVE & ONLINE DEVICES",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = DarkOnSurfaceMuted
+                                )
+                            }
+                            Text(
+                                text = "${summary.activeEndpoints} / ${summary.totalEndpoints}",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = SecurityGreen
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(DarkSurfaceVariant)
+                        ) {
+                            val activeRatio = if (summary.totalEndpoints > 0) summary.activeEndpoints.toFloat() / summary.totalEndpoints else 0f
+                            val safeActive = activeRatio.coerceIn(0f, 1f)
+                            val safeOffline = (1f - safeActive).coerceIn(0f, 1f)
+
+                            if (safeActive > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .weight(safeActive.coerceAtLeast(0.01f))
+                                        .background(SecurityGreen)
+                                )
+                            }
+                            if (safeOffline > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .weight(safeOffline.coerceAtLeast(0.01f))
+                                        .background(Color.Gray.copy(alpha = 0.35f))
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "${summary.activeEndpoints} Connected & Active",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SecurityGreen
+                            )
+                            val offlineCount = (summary.totalEndpoints - summary.activeEndpoints).coerceAtLeast(0)
+                            Text(
+                                text = "$offlineCount Inactive / Offline",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = DarkOnSurfaceMuted
+                            )
+                        }
                     }
                 }
             }

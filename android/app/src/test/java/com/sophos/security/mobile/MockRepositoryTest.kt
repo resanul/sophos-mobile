@@ -16,6 +16,20 @@ class MockRepositoryTest {
         assertTrue(summary.totalEndpoints > 0)
         assertEquals(summary.totalEndpoints, summary.healthyEndpoints + summary.suspiciousEndpoints + summary.badEndpoints)
         assertTrue(summary.activeCriticalAlerts >= 0)
+        assertTrue(summary.activeEndpoints >= 0)
+        assertTrue(summary.activeEndpoints <= summary.totalEndpoints)
+    }
+
+    @Test
+    fun testEndpointOnlineAndTypeCounts() = runTest {
+        val endpoints = MockSecurityRepository.getEndpoints().first()
+        val total = endpoints.size
+        val servers = endpoints.count { it.isServer }
+        val workstations = endpoints.count { !it.isServer }
+        val online = endpoints.count { it.online }
+
+        assertEquals(total, servers + workstations)
+        assertTrue(online in 0..total)
     }
 
     @Test
