@@ -1,0 +1,140 @@
+name: Sophos Security Mobile CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*.*.*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # 1. Android Application CI (Build, Unit Tests & APK Artifacts)
+  # ============================================================================
+  android-ci:
+    name: Android Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java Development Kit (JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK Platform & Build-Tools
+        uses: android-actions/setup-android@v3
+
+      - name: Ensure Gradle Wrapper Executable Permissions
+        run: chmod +x android/gradlew
+
+      - name: Run Android Unit Test Suite
+        working-directory: android
+        run: ./gradlew testReleaseUnitTest --no-daemon --stacktrace
+
+      - name: Build Android Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Build Android Production Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Upload Android Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sophos-Security-Mobile-Release-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+
+      - name: Upload Android Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sophos-Security-Mobile-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      - name: Upload Unit Test HTML Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: android/app/build/reports/tests/
+          retention-days: 7
+
+  # ============================================================================
+  # 2. Python Gateway Backend CI (Linting & Pytest Suite)
+  # ============================================================================
+  backend-ci:
+    name: Backend Gateway CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Gateway Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Run Backend Pytest Suite
+        run: |
+          cd backend
+          pytest tests/ -v
+
+  # ============================================================================
+  # 3. Automated GitHub Release on Git Tag Push (v*.*.*)
+  # ============================================================================
+  publish-release:
+    name: Publish Production GitHub Release
+    needs: [android-ci, backend-ci]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download Release APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Sophos-Security-Mobile-Release-APK
+          path: release-artifacts/
+
+      - name: Rename APK for Distribution
+        run: |
+          mkdir -p dist
+          cp release-artifacts/app-release.apk dist/Sophos-Security-Mobile-${{ github.ref_name }}.apk
+
+      - name: Create Official GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Sophos Security Mobile ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/Sophos-Security-Mobile-${{ github.ref_name }}.apk

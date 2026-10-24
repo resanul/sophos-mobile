@@ -1,13 +1,16 @@
 # Sophos Security Mobile — Enterprise Android SOC Application & FastAPI Gateway
 
+[![CI/CD Pipeline](https://github.com/resanul/sophos-mobile/actions/workflows/ci.yml/badge.svg)](https://github.com/resanul/sophos-mobile/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Android_14+-green.svg)](https://developer.android.com)
+[![Platform](https://img.shields.io/badge/Platform-Android_8.0+_(API_26+)-green.svg)](https://developer.android.com)
+[![Compose](https://img.shields.io/badge/UI-Jetpack_Compose_Material_3-4285F4.svg)](https://developer.android.com/jetpack/compose)
 [![Backend](https://img.shields.io/badge/Backend-FastAPI_0.115+-009688.svg)](https://fastapi.tiangolo.com)
-[![Architecture](https://img.shields.io/badge/Architecture-Clean_MVVM_+_Zero_Trust_Gateway-purple.svg)]()
 
 **Sophos Security Mobile** is an enterprise-grade mobile security operations console designed for security analysts, incident responders, and SOC administrators who manage Sophos Central tenants.
 
-The system combines a native Android application built with Jetpack Compose (Material 3 Dark SOC theme) and a high-performance FastAPI backend gateway that acts as a secure, authenticated, and audited intermediary between mobile clients and official Sophos Central APIs.
+The system supports **two flexible deployment modes**:
+1. **Direct Cloud Standalone Mode**: The Android application communicates directly with Sophos Central Cloud APIs (`https://id.sophos.com` and `https://api-*.central.sophos.com`) via standard HTTPS, enabling full mobile SOC capabilities anywhere with zero local PC or server dependencies.
+2. **Zero-Trust Enterprise Gateway**: An optional high-performance FastAPI backend gateway that acts as a centralized, authenticated, and audited intermediary with Role-Based Access Control (RBAC).
 
 ---
 

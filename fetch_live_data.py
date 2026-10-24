@@ -1,8 +1,9 @@
+import os
 import httpx
 import json
 
-client_id = 'e3c3ef9a-9114-4bd3-b75a-32b2eb223a23'
-client_secret = 'ee496bce83decc6dd57aa41c2e40a095b99be98d38ece882c1ff34355ac3356695f8dec7dcbea900139e04e7ff733f79057d'
+client_id = os.getenv("SOPHOS_CLIENT_ID", "e3c3ef9a-9114-4bd3-b75a-32b2eb223a23")
+client_secret = os.getenv("SOPHOS_CLIENT_SECRET", "ee496bce83decc6dd57aa41c2e40a095b99be98d38ece882c1ff34355ac3356695f8dec7dcbea900139e04e7ff733f79057d")
 
 # 1. Get OAuth2 Token
 token_resp = httpx.post(
