@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -24,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sophos.security.mobile.core.designsystem.theme.*
 import com.sophos.security.mobile.core.network.MockSecurityRepository
+import com.sophos.security.mobile.core.security.BiometricAuthManager
+import com.sophos.security.mobile.core.security.findFragmentActivity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -83,8 +86,11 @@ fun LoginScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+
+    var isBiometricEnrolled by remember { mutableStateOf(BiometricAuthManager.isBiometricEnrolled()) }
 
     Column(
         modifier = Modifier
@@ -120,7 +126,117 @@ fun LoginScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // Biometric Fingerprint Option if Enrolled
+        if (isBiometricEnrolled) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    width = 1.dp,
+                    brush = androidx.compose.ui.graphics.SolidColor(SecurityGreen.copy(alpha = 0.6f))
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Fingerprint,
+                            contentDescription = null,
+                            tint = SecurityGreen,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Fingerprint Login Available",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "One-touch secure biometric login",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DarkOnSurfaceMuted
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            val activity = context.findFragmentActivity()
+                            if (activity != null) {
+                                BiometricAuthManager.authenticate(
+                                    activity = activity,
+                                    title = "Sophos SOC Fingerprint Login",
+                                    subtitle = "Touch sensor to log into Central console",
+                                    onSuccess = {
+                                        val creds = BiometricAuthManager.getEnrolledCredentials()
+                                        if (creds != null) {
+                                            userId = creds.first
+                                            secret = creds.second
+                                            isLoading = true
+                                            errorMessage = null
+                                            coroutineScope.launch {
+                                                val result = MockSecurityRepository.login(creds.first, creds.second)
+                                                isLoading = false
+                                                result.onSuccess {
+                                                    onLoginSuccess()
+                                                }.onFailure { err ->
+                                                    errorMessage = err.message ?: "Authentication failed."
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onError = { err ->
+                                        errorMessage = err
+                                    }
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen)
+                    ) {
+                        Icon(
+                            Icons.Default.Fingerprint,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "UNLOCK WITH FINGERPRINT",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(modifier = Modifier.weight(1f), color = DarkBorder)
+                Text(
+                    text = "  OR ENTER CREDENTIALS  ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DarkOnSurfaceMuted
+                )
+                HorizontalDivider(modifier = Modifier.weight(1f), color = DarkBorder)
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+        }
 
         // User ID Field
         Text(

@@ -41,6 +41,11 @@ object MockSecurityRepository {
     private val isSyncingFlow = MutableStateFlow(false)
     val isSyncing: Flow<Boolean> = isSyncingFlow.asStateFlow()
 
+    val endpointFilter = MutableStateFlow("ALL")
+    fun setEndpointFilter(filter: String) {
+        endpointFilter.value = filter
+    }
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true

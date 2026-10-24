@@ -147,7 +147,10 @@ fun DashboardScreen(
                         subtitle = "${summary.activeEndpoints} Active Online • ${summary.badEndpoints} Bad",
                         icon = Icons.Default.Devices,
                         accentColor = SecurityGreen,
-                        onClick = onNavigateToEndpoints,
+                        onClick = {
+                            MockSecurityRepository.setEndpointFilter("ALL")
+                            onNavigateToEndpoints()
+                        },
                         modifier = Modifier.weight(1f)
                     )
                     MetricCard(
@@ -204,7 +207,10 @@ fun DashboardScreen(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)),
-                    onClick = onNavigateToEndpoints
+                    onClick = {
+                        MockSecurityRepository.setEndpointFilter("ONLINE")
+                        onNavigateToEndpoints()
+                    }
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(

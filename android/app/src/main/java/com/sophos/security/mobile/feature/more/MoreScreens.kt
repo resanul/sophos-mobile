@@ -16,10 +16,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.sophos.security.mobile.core.designsystem.components.*
 import com.sophos.security.mobile.core.designsystem.theme.*
 import com.sophos.security.mobile.core.model.*
+import com.sophos.security.mobile.core.network.MockSecurityRepository
+import com.sophos.security.mobile.core.security.BiometricAuthManager
+import com.sophos.security.mobile.core.security.findFragmentActivity
 
 @Composable
 fun MoreMenuScreen(
@@ -113,9 +119,9 @@ fun MoreMenuScreen(
             }
             item {
                 MenuItem(
-                    icon = Icons.Default.Settings,
-                    title = "Application Settings",
-                    subtitle = "Theme, biometrics, sync intervals",
+                    icon = Icons.Default.Security,
+                    title = "Security & Biometric Settings",
+                    subtitle = "Fingerprint login, dark theme, containment re-auth",
                     onClick = onNavigateToSettings
                 )
             }
@@ -331,28 +337,184 @@ fun UserProfileScreen(onNavigateBack: () -> Unit) {
 
 @Composable
 fun SettingsScreen(onNavigateBack: () -> Unit) {
+    val context = LocalContext.current
     var darkMode by remember { mutableStateOf(true) }
     var biometricEnforced by remember { mutableStateOf(true) }
-    var syncInterval by remember { mutableStateOf("30 seconds") }
+    var isBiometricEnrolled by remember { mutableStateOf(BiometricAuthManager.isBiometricEnrolled()) }
+    var biometricStatusMessage by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
-        topBar = { SecurityTopBar("Settings & Preferences", canNavigateBack = true, onNavigateBack = onNavigateBack) },
+        topBar = { SecurityTopBar("Security & Preferences", canNavigateBack = true, onNavigateBack = onNavigateBack) },
         containerColor = DarkBackground
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Dark Theme (SOC Mode)", style = MaterialTheme.typography.titleSmall, color = Color.White)
-                    Text("High contrast dark interface", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // BIOMETRIC & FINGERPRINT SECURITY
+            Text(
+                text = "BIOMETRIC & FINGERPRINT SECURITY",
+                style = MaterialTheme.typography.labelMedium,
+                color = DarkOnSurfaceMuted
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    width = 0.5.dp,
+                    brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Fingerprint,
+                                contentDescription = null,
+                                tint = if (isBiometricEnrolled) SecurityGreen else DarkOnSurfaceMuted,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Fingerprint Quick Login",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (isBiometricEnrolled) "Enrolled & Active for Fast Unlock" else "Log in with sensor instead of entering secret",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isBiometricEnrolled) SecurityGreen else DarkOnSurfaceMuted
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    if (isBiometricEnrolled) {
+                        val creds = BiometricAuthManager.getEnrolledCredentials()
+                        val maskedUser = creds?.first?.take(10)?.plus("...") ?: "Active User"
+                        Text(
+                            text = "Linked to User ID: $maskedUser",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = DarkOnSurfaceMuted
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                BiometricAuthManager.disableBiometric()
+                                isBiometricEnrolled = false
+                                biometricStatusMessage = "Fingerprint login disabled."
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SeverityCritical),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, SeverityCritical.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("DISABLE FINGERPRINT LOGIN", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                val currentId = MockSecurityRepository.clientId
+                                val currentSec = MockSecurityRepository.clientSecret
+                                if (currentId.isNotBlank() && currentSec.isNotBlank()) {
+                                    val activity = context.findFragmentActivity()
+                                    if (activity != null) {
+                                        BiometricAuthManager.authenticate(
+                                            activity = activity,
+                                            title = "Enroll Fingerprint Login",
+                                            subtitle = "Touch sensor to register fingerprint for this account",
+                                            onSuccess = {
+                                                BiometricAuthManager.enrollCredentials(currentId, currentSec)
+                                                isBiometricEnrolled = true
+                                                biometricStatusMessage = "Fingerprint login successfully registered!"
+                                            },
+                                            onError = { err ->
+                                                biometricStatusMessage = "Fingerprint enrollment: $err"
+                                            }
+                                        )
+                                    } else {
+                                        biometricStatusMessage = "Biometric prompt not available in current window."
+                                    }
+                                } else {
+                                    biometricStatusMessage = "Please log in with User ID and Secret first to bind fingerprint."
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Fingerprint, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("ENROLL FINGERPRINT FOR LOGIN", fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    }
+
+                    if (biometricStatusMessage != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = biometricStatusMessage ?: "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isBiometricEnrolled) SecurityGreen else SeverityHigh
+                        )
+                    }
                 }
-                Switch(checked = darkMode, onCheckedChange = { darkMode = it })
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Biometric Re-auth on Containment", style = MaterialTheme.typography.titleSmall, color = Color.White)
-                    Text("Require fingerprint/face to isolate hosts", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+
+            // SOC PREFERENCES
+            Text(
+                text = "SOC PREFERENCES",
+                style = MaterialTheme.typography.labelMedium,
+                color = DarkOnSurfaceMuted
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    width = 0.5.dp,
+                    brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Dark Theme (SOC Mode)", style = MaterialTheme.typography.titleSmall, color = Color.White)
+                            Text("High contrast dark interface", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+                        }
+                        Switch(checked = darkMode, onCheckedChange = { darkMode = it })
+                    }
+                    HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Biometric Re-auth on Containment", style = MaterialTheme.typography.titleSmall, color = Color.White)
+                            Text("Require fingerprint/face to isolate hosts", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceMuted)
+                        }
+                        Switch(checked = biometricEnforced, onCheckedChange = { biometricEnforced = it })
+                    }
                 }
-                Switch(checked = biometricEnforced, onCheckedChange = { biometricEnforced = it })
             }
         }
     }

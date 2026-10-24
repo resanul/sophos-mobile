@@ -82,4 +82,12 @@ class MockRepositoryTest {
         assertEquals("test-tenant-123", decoded.tenantId)
         assertEquals("https://api-us03.central.sophos.com", decoded.dataRegionUrl)
     }
+
+    @Test
+    fun testEndpointFilterState() {
+        MockSecurityRepository.setEndpointFilter("ONLINE")
+        assertEquals("ONLINE", MockSecurityRepository.endpointFilter.value)
+        MockSecurityRepository.setEndpointFilter("ALL")
+        assertEquals("ALL", MockSecurityRepository.endpointFilter.value)
+    }
 }

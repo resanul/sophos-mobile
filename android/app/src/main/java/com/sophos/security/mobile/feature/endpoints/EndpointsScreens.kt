@@ -35,18 +35,29 @@ enum class EndpointSortField(val label: String) {
 fun EndpointsListScreen(
     onNavigateToEndpointDetail: (String) -> Unit
 ) {
+    val defaultFilter by MockSecurityRepository.endpointFilter.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
-    var filterType by remember { mutableStateOf("ALL") } // ALL, SERVERS, WORKSTATIONS, ISOLATED
+    var filterType by remember { mutableStateOf(defaultFilter) } // ALL, ONLINE, SERVERS, WORKSTATIONS, ISOLATED
+    var onlineSubFilter by remember { mutableStateOf("ALL_ONLINE") } // ALL_ONLINE, ONLINE_SERVERS, ONLINE_WORKSTATIONS
     var sortField by remember { mutableStateOf(EndpointSortField.HOSTNAME) }
     var isAscending by remember { mutableStateOf(true) }
     var sortDropdownOpen by remember { mutableStateOf(false) }
 
+    LaunchedEffect(defaultFilter) {
+        filterType = defaultFilter
+    }
+
     val endpoints by MockSecurityRepository.getEndpoints().collectAsState(initial = emptyList())
     val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
 
+    val allCount = endpoints.size
+    val onlineCount = remember(endpoints) { endpoints.count { it.online } }
     val serverCount = remember(endpoints) { endpoints.count { it.isServer } }
     val workstationCount = remember(endpoints) { endpoints.count { !it.isServer } }
     val isolatedCount = remember(endpoints) { endpoints.count { it.isolated } }
+
+    val activeServerCount = remember(endpoints) { endpoints.count { it.online && it.isServer } }
+    val activeWorkstationCount = remember(endpoints) { endpoints.count { it.online && !it.isServer } }
 
     val filteredEndpoints = endpoints.filter { ep ->
         val matchesQuery = searchQuery.isEmpty() ||
@@ -54,6 +65,13 @@ fun EndpointsListScreen(
                 ep.ipAddresses.any { it.contains(searchQuery) } ||
                 ep.os.contains(searchQuery, ignoreCase = true)
         val matchesType = when (filterType) {
+            "ONLINE" -> {
+                when (onlineSubFilter) {
+                    "ONLINE_SERVERS" -> ep.online && ep.isServer
+                    "ONLINE_WORKSTATIONS" -> ep.online && !ep.isServer
+                    else -> ep.online
+                }
+            }
             "SERVERS" -> ep.isServer
             "WORKSTATIONS" -> !ep.isServer
             "ISOLATED" -> ep.isolated
@@ -123,24 +141,92 @@ fun EndpointsListScreen(
             ) {
                 FilterChip(
                     selected = filterType == "ALL",
-                    onClick = { filterType = "ALL" },
-                    label = { Text("ALL (${endpoints.size})") }
+                    onClick = {
+                        filterType = "ALL"
+                        MockSecurityRepository.setEndpointFilter("ALL")
+                    },
+                    label = { Text("ALL ($allCount)") }
+                )
+                FilterChip(
+                    selected = filterType == "ONLINE",
+                    onClick = {
+                        filterType = "ONLINE"
+                        MockSecurityRepository.setEndpointFilter("ONLINE")
+                    },
+                    label = { Text("ONLINE ($onlineCount)") }
                 )
                 FilterChip(
                     selected = filterType == "SERVERS",
-                    onClick = { filterType = "SERVERS" },
+                    onClick = {
+                        filterType = "SERVERS"
+                        MockSecurityRepository.setEndpointFilter("SERVERS")
+                    },
                     label = { Text("SERVERS ($serverCount)") }
                 )
                 FilterChip(
                     selected = filterType == "WORKSTATIONS",
-                    onClick = { filterType = "WORKSTATIONS" },
+                    onClick = {
+                        filterType = "WORKSTATIONS"
+                        MockSecurityRepository.setEndpointFilter("WORKSTATIONS")
+                    },
                     label = { Text("WORKSTATIONS ($workstationCount)") }
                 )
                 FilterChip(
                     selected = filterType == "ISOLATED",
-                    onClick = { filterType = "ISOLATED" },
+                    onClick = {
+                        filterType = "ISOLATED"
+                        MockSecurityRepository.setEndpointFilter("ISOLATED")
+                    },
                     label = { Text("ISOLATED ($isolatedCount)") }
                 )
+            }
+
+            // Sub-filter for Active & Online Devices (All Active vs Active Servers vs Active Workstations)
+            if (filterType == "ONLINE") {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssistChip(
+                        onClick = { onlineSubFilter = "ALL_ONLINE" },
+                        label = { Text("All Active ($onlineCount)") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (onlineSubFilter == "ALL_ONLINE") SecurityGreenContainer else DarkSurfaceVariant,
+                            labelColor = if (onlineSubFilter == "ALL_ONLINE") SecurityGreen else DarkOnSurfaceMuted
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.5.dp,
+                            if (onlineSubFilter == "ALL_ONLINE") SecurityGreen else DarkBorder
+                        )
+                    )
+                    AssistChip(
+                        onClick = { onlineSubFilter = "ONLINE_SERVERS" },
+                        label = { Text("Active Servers ($activeServerCount)") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (onlineSubFilter == "ONLINE_SERVERS") SecurityGreenContainer else DarkSurfaceVariant,
+                            labelColor = if (onlineSubFilter == "ONLINE_SERVERS") SecurityGreen else DarkOnSurfaceMuted
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.5.dp,
+                            if (onlineSubFilter == "ONLINE_SERVERS") SecurityGreen else DarkBorder
+                        )
+                    )
+                    AssistChip(
+                        onClick = { onlineSubFilter = "ONLINE_WORKSTATIONS" },
+                        label = { Text("Active Workstations ($activeWorkstationCount)") },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (onlineSubFilter == "ONLINE_WORKSTATIONS") SecurityGreenContainer else DarkSurfaceVariant,
+                            labelColor = if (onlineSubFilter == "ONLINE_WORKSTATIONS") SecurityGreen else DarkOnSurfaceMuted
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.5.dp,
+                            if (onlineSubFilter == "ONLINE_WORKSTATIONS") SecurityGreen else DarkBorder
+                        )
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))

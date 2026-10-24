@@ -126,6 +126,70 @@ object EncryptedStorageManager {
         return targetFile.exists() && targetFile.length() >= (GCM_IV_LENGTH + 16)
     }
 
+    private const val BIOMETRIC_CREDENTIALS_FILE = "sophos_biometric_credentials.enc"
+
+    fun saveBiometricCredentials(userId: String, secret: String): Boolean {
+        val context = appContext ?: return false
+        return try {
+            val payload = "$userId\n$secret"
+            val secretKey = getOrCreateSecretKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            val iv = cipher.iv
+            val cipherText = cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
+            val targetFile = File(context.filesDir, BIOMETRIC_CREDENTIALS_FILE)
+            val out = ByteArrayOutputStream()
+            out.write(iv)
+            out.write(cipherText)
+            targetFile.writeBytes(out.toByteArray())
+            Log.i(TAG, "Biometric credentials saved securely")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save biometric credentials: ${e.message}", e)
+            false
+        }
+    }
+
+    fun getBiometricCredentials(): Pair<String, String>? {
+        val context = appContext ?: return null
+        val targetFile = File(context.filesDir, BIOMETRIC_CREDENTIALS_FILE)
+        if (!targetFile.exists() || targetFile.length() < (GCM_IV_LENGTH + 16)) return null
+        return try {
+            val allBytes = targetFile.readBytes()
+            val iv = allBytes.copyOfRange(0, GCM_IV_LENGTH)
+            val cipherText = allBytes.copyOfRange(GCM_IV_LENGTH, allBytes.size)
+            val secretKey = getOrCreateSecretKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val spec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
+            val decrypted = String(cipher.doFinal(cipherText), Charsets.UTF_8)
+            val parts = decrypted.split("\n", limit = 2)
+            if (parts.size == 2 && parts[0].isNotEmpty() && parts[1].isNotEmpty()) {
+                Pair(parts[0], parts[1])
+            } else null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read biometric credentials: ${e.message}", e)
+            null
+        }
+    }
+
+    fun hasBiometricCredentials(): Boolean {
+        val context = appContext ?: return false
+        val targetFile = File(context.filesDir, BIOMETRIC_CREDENTIALS_FILE)
+        return targetFile.exists() && targetFile.length() >= (GCM_IV_LENGTH + 16)
+    }
+
+    fun clearBiometricCredentials() {
+        val context = appContext ?: return
+        try {
+            val file = File(context.filesDir, BIOMETRIC_CREDENTIALS_FILE)
+            if (file.exists()) file.delete()
+            Log.i(TAG, "Biometric credentials cleared")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear biometric credentials: ${e.message}")
+        }
+    }
+
     fun clearCache() {
         val context = appContext ?: return
         try {

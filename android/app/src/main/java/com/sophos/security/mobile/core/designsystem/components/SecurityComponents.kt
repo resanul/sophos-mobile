@@ -311,6 +311,54 @@ fun EndpointCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (endpoint.isServer) Color(0xFF1E293B) else Color(0xFF0F2942),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, if (endpoint.isServer) Color(0xFF64748B) else Color(0xFF38BDF8).copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = if (endpoint.isServer) "SERVER" else "WORKSTATION",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (endpoint.isServer) Color(0xFF94A3B8) else Color(0xFF7DD3FC),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (endpoint.online) SecurityGreen.copy(alpha = 0.15f) else Color.Gray.copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, if (endpoint.online) SecurityGreen.copy(alpha = 0.4f) else Color.Gray.copy(alpha = 0.3f))
+                    ) {
+                        Text(
+                            text = if (endpoint.online) "ONLINE" else "OFFLINE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (endpoint.online) SecurityGreen else Color.Gray,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                Text(
+                    text = endpoint.lastSeenAt,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DarkOnSurfaceMuted,
+                    fontSize = 11.sp
+                )
+            }
             if (endpoint.isolated) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
