@@ -2,9 +2,11 @@ package com.sophos.security.mobile.feature.endpoints
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -28,6 +30,7 @@ fun EndpointsListScreen(
     var searchQuery by remember { mutableStateOf("") }
     var filterType by remember { mutableStateOf("ALL") } // ALL, SERVERS, WORKSTATIONS, ISOLATED
     val endpoints by MockSecurityRepository.getEndpoints().collectAsState(initial = emptyList())
+    val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
 
     val filteredEndpoints = endpoints.filter { ep ->
         val matchesQuery = searchQuery.isEmpty() ||
@@ -47,7 +50,7 @@ fun EndpointsListScreen(
         topBar = {
             SecurityTopBar(
                 title = "Endpoint Inventory",
-                subtitle = "${filteredEndpoints.size} managed devices"
+                subtitle = if (isSyncing) "${filteredEndpoints.size} devices (fetching live...)" else "${filteredEndpoints.size} managed devices"
             )
         },
         containerColor = DarkBackground
@@ -58,6 +61,15 @@ fun EndpointsListScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
+            if (isSyncing) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    color = SecurityGreen,
+                    trackColor = DarkSurfaceVariant
+                )
+            }
             SearchBarComponent(
                 query = searchQuery,
                 onQueryChange = { searchQuery = it },
@@ -67,7 +79,9 @@ fun EndpointsListScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
@@ -104,7 +118,7 @@ fun EndpointsListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(filteredEndpoints) { ep ->
+                    items(filteredEndpoints, key = { it.id }) { ep ->
                         EndpointCard(
                             endpoint = ep,
                             onClick = { onNavigateToEndpointDetail(ep.id) }

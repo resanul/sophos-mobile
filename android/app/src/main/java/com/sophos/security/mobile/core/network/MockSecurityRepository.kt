@@ -12,22 +12,26 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 object MockSecurityRepository {
 
     private const val TAG = "SophosDirectAPI"
 
-    // Default Sophos Central Service Principal Credentials
-    var clientId: String = "e3c3ef9a-9114-4bd3-b75a-32b2eb223a23"
-    var clientSecret: String = "ee496bce83decc6dd57aa41c2e40a095b99be98d38ece882c1ff34355ac3356695f8dec7dcbea900139e04e7ff733f79057d"
-    var tenantId: String = "f55209e1-802e-45e4-8cf8-f5db160a1ebd"
-    var dataRegionUrl: String = "https://api-us03.central.sophos.com"
+    // Dynamic Sophos Central Service Principal Credentials (session in-memory only)
+    var clientId: String = ""
+    var clientSecret: String = ""
+    var tenantId: String = ""
+    var dataRegionUrl: String = ""
 
     private var cachedToken: String? = null
     private var tokenExpiryMs: Long = 0L
 
-    var lastSyncStatus: String = "Connecting directly to Sophos Central..."
+    var isLoggedIn: Boolean = false
+        private set
+
+    var lastSyncStatus: String = "Awaiting credentials..."
         private set
     var isLiveConnected: Boolean = false
         private set
@@ -42,8 +46,8 @@ object MockSecurityRepository {
     }
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
@@ -246,7 +250,7 @@ object MockSecurityRepository {
             activeHighAlerts = 1,
             openCases = 2,
             recentDetectionsCount = 2,
-            syncFreshnessTimestamp = "Starting direct sync...",
+            syncFreshnessTimestamp = "Awaiting login...",
             isLiveDataSource = false,
             tenantName = "Enterprise Security Operations Tenant",
             dataRegion = "Sophos Central Cloud"
@@ -254,7 +258,9 @@ object MockSecurityRepository {
     )
 
     init {
-        refresh()
+        if (clientId.isNotBlank() && clientSecret.isNotBlank()) {
+            refresh()
+        }
     }
 
     fun getDashboardSummary(): DashboardSummary = dashboardSummary.value
@@ -266,13 +272,114 @@ object MockSecurityRepository {
     fun getCases(): Flow<List<XdrCase>> = cases.asStateFlow()
     fun getHuntTemplates(): List<ThreatHuntTemplate> = threatHuntTemplates
 
+    suspend fun login(userId: String, secret: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val trimmedUser = userId.trim()
+        val trimmedSecret = secret.trim()
+
+        if (trimmedUser.isBlank() || trimmedSecret.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter both User ID and Secret"))
+        }
+
+        try {
+            val formBody = FormBody.Builder()
+                .add("grant_type", "client_credentials")
+                .add("client_id", trimmedUser)
+                .add("client_secret", trimmedSecret)
+                .add("scope", "token")
+                .build()
+
+            val req = Request.Builder()
+                .url("https://id.sophos.com/api/v2/oauth2/token")
+                .post(formBody)
+                .build()
+
+            val token: String
+            val expiresIn: Int
+
+            okHttpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val errBody = resp.body?.string() ?: ""
+                    Log.e(TAG, "OAuth failed HTTP ${resp.code}: $errBody")
+                    val msg = if (resp.code == 401 || resp.code == 400) {
+                        "Invalid User ID or Secret. Please verify your credentials."
+                    } else {
+                        "Authentication error (HTTP ${resp.code}). Please check your connection."
+                    }
+                    return@withContext Result.failure(Exception(msg))
+                }
+
+                val bodyStr = resp.body?.string() ?: return@withContext Result.failure(Exception("Empty authentication response"))
+                val root = json.parseToJsonElement(bodyStr).jsonObject
+                token = root["access_token"]?.jsonPrimitive?.contentOrNull
+                    ?: return@withContext Result.failure(Exception("Failed to obtain access token from Sophos Central"))
+                expiresIn = root["expires_in"]?.jsonPrimitive?.intOrNull ?: 3600
+            }
+
+            // Save in-memory credentials and session state
+            clientId = trimmedUser
+            clientSecret = trimmedSecret
+            cachedToken = token
+            tokenExpiryMs = System.currentTimeMillis() + ((expiresIn - 60).coerceAtLeast(60) * 1000L)
+            isLoggedIn = true
+
+            // Auto-discover tenant ID and data region URL via /whoami
+            try {
+                val whoamiReq = Request.Builder()
+                    .url("https://api.central.sophos.com/whoami/v1")
+                    .header("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+                okHttpClient.newCall(whoamiReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: "{}"
+                        val whoamiObj = json.parseToJsonElement(body).jsonObject
+                        val discoveredTenant = whoamiObj["id"]?.jsonPrimitive?.contentOrNull
+                        val discoveredRegion = whoamiObj["apiHosts"]?.jsonObject?.get("dataRegion")?.jsonPrimitive?.contentOrNull
+                        if (!discoveredTenant.isNullOrEmpty()) tenantId = discoveredTenant
+                        if (!discoveredRegion.isNullOrEmpty()) dataRegionUrl = discoveredRegion
+                        Log.i(TAG, "Discovered tenant: $tenantId, region: $dataRegionUrl")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Whoami discovery error: ${e.message}")
+            }
+
+            // Trigger full background sync for all 2,688 endpoints and alerts
+            repositoryScope.launch {
+                syncDirectFromSophosCentral()
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Network connection error during login: ${e.message}", e)
+            Result.failure(Exception("Network connection failed: ${e.localizedMessage ?: "Unable to connect to id.sophos.com"}"))
+        }
+    }
+
+    fun logout() {
+        clientId = ""
+        clientSecret = ""
+        tenantId = ""
+        dataRegionUrl = ""
+        cachedToken = null
+        tokenExpiryMs = 0L
+        isLoggedIn = false
+        isLiveConnected = false
+        lastSyncStatus = "Logged out"
+    }
+
     fun refresh() {
+        if (clientId.isBlank() || clientSecret.isBlank()) return
         repositoryScope.launch {
             syncDirectFromSophosCentral()
         }
     }
 
     private suspend fun getValidOAuthToken(): String? = withContext(Dispatchers.IO) {
+        if (clientId.isBlank() || clientSecret.isBlank()) {
+            return@withContext null
+        }
+
         if (cachedToken != null && System.currentTimeMillis() < tokenExpiryMs) {
             return@withContext cachedToken
         }
@@ -317,6 +424,7 @@ object MockSecurityRepository {
     }
 
     private suspend fun syncDirectFromSophosCentral() = withContext(Dispatchers.IO) {
+        if (clientId.isBlank() || clientSecret.isBlank()) return@withContext
         if (isSyncingFlow.value) return@withContext
         isSyncingFlow.value = true
         lastSyncStatus = "Authenticating with Sophos Central..."
@@ -350,157 +458,217 @@ object MockSecurityRepository {
             }
         }
 
+        if (dataRegionUrl.isEmpty() || tenantId.isEmpty()) {
+            Log.e(TAG, "Missing dataRegionUrl or tenantId")
+            isSyncingFlow.value = false
+            return@withContext
+        }
+
         var fetchedEndpoints: List<Endpoint>? = null
         var fetchedAlerts: List<Alert>? = null
 
-        // 1. Direct Endpoints Fetch
+        // 1. Direct Endpoints Fetch with full pagination
         try {
-            val epReq = Request.Builder()
-                .url("$dataRegionUrl/endpoint/v1/endpoints?view=full&pageTotal=true")
-                .header("Authorization", "Bearer $token")
-                .header("X-Tenant-ID", tenantId)
-                .get()
-                .build()
+            var nextKey: String? = null
+            val allEndpoints = mutableListOf<Endpoint>()
+            var pageIndex = 1
+            val maxPages = 50
 
-            okHttpClient.newCall(epReq).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: "{}"
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+            do {
+                lastSyncStatus = "Loading endpoints (page $pageIndex, ${allEndpoints.size} loaded)..."
+                val urlBuilder = StringBuilder("$dataRegionUrl/endpoint/v1/endpoints?pageSize=500&view=full&pageTotal=true")
+                if (!nextKey.isNullOrEmpty()) {
+                    val encodedKey = URLEncoder.encode(nextKey, "UTF-8")
+                    urlBuilder.append("&pageFromKey=$encodedKey")
+                }
 
-                    val list = mutableListOf<Endpoint>()
-                    for (elem in items) {
-                        val epObj = elem.jsonObject
-                        val id = epObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val hostname = epObj["hostname"]?.jsonPrimitive?.contentOrNull ?: "Host-${id.take(6)}"
+                val epReq = Request.Builder()
+                    .url(urlBuilder.toString())
+                    .header("Authorization", "Bearer $token")
+                    .header("X-Tenant-ID", tenantId)
+                    .get()
+                    .build()
 
-                        val ips = mutableListOf<String>()
-                        epObj["ipv4Addresses"]?.jsonArray?.forEach { ipElem ->
-                            ipElem.jsonPrimitive.contentOrNull?.let { ips.add(it) }
-                        }
-                        if (ips.isEmpty()) {
-                            epObj["assignedIps"]?.jsonArray?.forEach { ipElem ->
+                var pageNextKey: String? = null
+
+                okHttpClient.newCall(epReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: "{}"
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+
+                        for (elem in items) {
+                            val epObj = elem.jsonObject
+                            val id = epObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val hostname = epObj["hostname"]?.jsonPrimitive?.contentOrNull ?: "Host-${id.take(6)}"
+
+                            val ips = mutableListOf<String>()
+                            epObj["ipv4Addresses"]?.jsonArray?.forEach { ipElem ->
                                 ipElem.jsonPrimitive.contentOrNull?.let { ips.add(it) }
                             }
-                        }
+                            if (ips.isEmpty()) {
+                                epObj["assignedIps"]?.jsonArray?.forEach { ipElem ->
+                                    ipElem.jsonPrimitive.contentOrNull?.let { ips.add(it) }
+                                }
+                            }
 
-                        val osName = epObj["os"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Windows"
-                        val overallHealth = epObj["health"]?.jsonObject?.get("overall")?.jsonPrimitive?.contentOrNull?.uppercase() ?: "GOOD"
-                        val health = when (overallHealth) {
-                            "GOOD" -> HealthState.GOOD
-                            "SUSPICIOUS" -> HealthState.SUSPICIOUS
-                            "BAD" -> HealthState.BAD
-                            else -> HealthState.GOOD
-                        }
+                            val osName = epObj["os"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Windows"
+                            val overallHealth = epObj["health"]?.jsonObject?.get("overall")?.jsonPrimitive?.contentOrNull?.uppercase() ?: "GOOD"
+                            val health = when (overallHealth) {
+                                "GOOD" -> HealthState.GOOD
+                                "SUSPICIOUS" -> HealthState.SUSPICIOUS
+                                "BAD" -> HealthState.BAD
+                                else -> HealthState.GOOD
+                            }
 
-                        val isolated = epObj["isolation"]?.jsonObject?.get("isolated")?.jsonPrimitive?.booleanOrNull
-                            ?: (epObj["isolation"]?.jsonObject?.get("status")?.jsonPrimitive?.contentOrNull == "isolated")
+                            val isolated = epObj["isolation"]?.jsonObject?.get("isolated")?.jsonPrimitive?.booleanOrNull
+                                ?: (epObj["isolation"]?.jsonObject?.get("status")?.jsonPrimitive?.contentOrNull == "isolated")
 
-                        val tamperProtection = epObj["tamperProtectionEnabled"]?.jsonPrimitive?.booleanOrNull
-                            ?: epObj["tamperProtection"]?.jsonObject?.get("enabled")?.jsonPrimitive?.booleanOrNull
-                            ?: true
+                            val tamperProtection = epObj["tamperProtectionEnabled"]?.jsonPrimitive?.booleanOrNull
+                                ?: epObj["tamperProtection"]?.jsonObject?.get("enabled")?.jsonPrimitive?.booleanOrNull
+                                ?: true
 
-                        val lastSeen = epObj["lastSeenAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
-                        val isServer = epObj["type"]?.jsonPrimitive?.contentOrNull?.equals("server", ignoreCase = true)
-                            ?: (epObj["os"]?.jsonObject?.get("isServer")?.jsonPrimitive?.booleanOrNull ?: false)
-                        val agentVersion = epObj["coreAgentVersion"]?.jsonPrimitive?.contentOrNull ?: "2026.2"
-                        val groupName = epObj["group"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Enterprise Core"
+                            val lastSeen = epObj["lastSeenAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                            val isServer = epObj["type"]?.jsonPrimitive?.contentOrNull?.equals("server", ignoreCase = true)
+                                ?: (epObj["os"]?.jsonObject?.get("isServer")?.jsonPrimitive?.booleanOrNull ?: false)
+                            val agentVersion = epObj["coreAgentVersion"]?.jsonPrimitive?.contentOrNull ?: "2026.2"
+                            val groupName = epObj["group"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull ?: "Enterprise Core"
 
-                        list.add(
-                            Endpoint(
-                                id = id,
-                                hostname = hostname,
-                                ipAddresses = ips,
-                                os = osName,
-                                health = health,
-                                isolated = isolated,
-                                tamperProtection = tamperProtection,
-                                lastSeenAt = lastSeen,
-                                isServer = isServer,
-                                agentVersion = agentVersion,
-                                groupName = groupName
+                            allEndpoints.add(
+                                Endpoint(
+                                    id = id,
+                                    hostname = hostname,
+                                    ipAddresses = ips,
+                                    os = osName,
+                                    health = health,
+                                    isolated = isolated,
+                                    tamperProtection = tamperProtection,
+                                    lastSeenAt = lastSeen,
+                                    isServer = isServer,
+                                    agentVersion = agentVersion,
+                                    groupName = groupName
+                                )
                             )
-                        )
+                        }
+
+                        pageNextKey = root["pages"]?.jsonObject?.get("nextKey")?.jsonPrimitive?.contentOrNull
+                        Log.i(TAG, "Endpoints page $pageIndex: fetched ${items.size} (total: ${allEndpoints.size}), nextKey: ${!pageNextKey.isNullOrEmpty()}")
+
+                        if (allEndpoints.isNotEmpty()) {
+                            endpoints.value = allEndpoints.toList()
+                        }
+                    } else {
+                        Log.e(TAG, "Endpoints call failed page $pageIndex HTTP ${resp.code}: ${resp.body?.string()}")
+                        pageNextKey = null
                     }
-                    if (list.isNotEmpty()) {
-                        fetchedEndpoints = list
-                        endpoints.value = list
-                    }
-                } else {
-                    Log.e(TAG, "Endpoints call failed HTTP ${resp.code}: ${resp.body?.string()}")
                 }
+
+                nextKey = pageNextKey
+                pageIndex++
+            } while (!nextKey.isNullOrEmpty() && pageIndex <= maxPages)
+
+            if (allEndpoints.isNotEmpty()) {
+                fetchedEndpoints = allEndpoints
+                endpoints.value = allEndpoints
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception fetching endpoints: ${e.message}", e)
         }
 
-        // 2. Direct Alerts Fetch
+        // 2. Direct Alerts Fetch with full pagination
         try {
-            val alertReq = Request.Builder()
-                .url("$dataRegionUrl/common/v1/alerts?limit=50")
-                .header("Authorization", "Bearer $token")
-                .header("X-Tenant-ID", tenantId)
-                .get()
-                .build()
+            var nextKey: String? = null
+            val allAlerts = mutableListOf<Alert>()
+            var pageIndex = 1
+            val maxPages = 20
 
-            okHttpClient.newCall(alertReq).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: "{}"
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+            do {
+                lastSyncStatus = "Loading alerts (page $pageIndex, ${allAlerts.size} loaded)..."
+                val urlBuilder = StringBuilder("$dataRegionUrl/common/v1/alerts?limit=100")
+                if (!nextKey.isNullOrEmpty()) {
+                    val encodedKey = URLEncoder.encode(nextKey, "UTF-8")
+                    urlBuilder.append("&pageFromKey=$encodedKey")
+                }
 
-                    val list = mutableListOf<Alert>()
-                    for (elem in items) {
-                        val aObj = elem.jsonObject
-                        val id = aObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val sevStr = aObj["severity"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
-                        val sev = when (sevStr) {
-                            "CRITICAL" -> Severity.CRITICAL
-                            "HIGH" -> Severity.HIGH
-                            "LOW" -> Severity.LOW
-                            "INFO" -> Severity.INFO
-                            else -> Severity.MEDIUM
+                val alertReq = Request.Builder()
+                    .url(urlBuilder.toString())
+                    .header("Authorization", "Bearer $token")
+                    .header("X-Tenant-ID", tenantId)
+                    .get()
+                    .build()
+
+                var pageNextKey: String? = null
+
+                okHttpClient.newCall(alertReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: "{}"
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+
+                        for (elem in items) {
+                            val aObj = elem.jsonObject
+                            val id = aObj["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val sevStr = aObj["severity"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
+                            val sev = when (sevStr) {
+                                "CRITICAL" -> Severity.CRITICAL
+                                "HIGH" -> Severity.HIGH
+                                "LOW" -> Severity.LOW
+                                "INFO" -> Severity.INFO
+                                else -> Severity.MEDIUM
+                            }
+
+                            val category = aObj["category"]?.jsonPrimitive?.contentOrNull ?: "Security Alert"
+                            val description = aObj["description"]?.jsonPrimitive?.contentOrNull ?: "Sophos Security Event"
+
+                            val endpointHostname = aObj["managedAgent"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
+                                ?: aObj["endpoint"]?.jsonObject?.get("hostname")?.jsonPrimitive?.contentOrNull
+                                ?: "Managed Device"
+
+                            val endpointId = aObj["managedAgent"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                                ?: aObj["endpoint"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                                ?: ""
+
+                            val detectedAt = aObj["raisedAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                            val product = aObj["product"]?.jsonPrimitive?.contentOrNull ?: "Sophos Central"
+                            val threatName = aObj["threatName"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val path = aObj["location"]?.jsonPrimitive?.contentOrNull ?: ""
+
+                            allAlerts.add(
+                                Alert(
+                                    id = id,
+                                    severity = sev,
+                                    category = category,
+                                    description = description,
+                                    endpointHostname = endpointHostname,
+                                    endpointId = endpointId,
+                                    detectedAt = detectedAt,
+                                    status = AlertStatus.OPEN,
+                                    product = product,
+                                    threatName = threatName,
+                                    path = path
+                                )
+                            )
                         }
 
-                        val category = aObj["category"]?.jsonPrimitive?.contentOrNull ?: "Security Alert"
-                        val description = aObj["description"]?.jsonPrimitive?.contentOrNull ?: "Sophos Security Event"
+                        pageNextKey = root["pages"]?.jsonObject?.get("nextKey")?.jsonPrimitive?.contentOrNull
+                        Log.i(TAG, "Alerts page $pageIndex: fetched ${items.size} (total: ${allAlerts.size}), nextKey: ${!pageNextKey.isNullOrEmpty()}")
 
-                        val endpointHostname = aObj["managedAgent"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
-                            ?: aObj["endpoint"]?.jsonObject?.get("hostname")?.jsonPrimitive?.contentOrNull
-                            ?: "Managed Device"
-
-                        val endpointId = aObj["managedAgent"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
-                            ?: aObj["endpoint"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
-                            ?: ""
-
-                        val detectedAt = aObj["raisedAt"]?.jsonPrimitive?.contentOrNull ?: "Recently"
-                        val product = aObj["product"]?.jsonPrimitive?.contentOrNull ?: "Sophos Central"
-                        val threatName = aObj["threatName"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val path = aObj["location"]?.jsonPrimitive?.contentOrNull ?: ""
-
-                        list.add(
-                            Alert(
-                                id = id,
-                                severity = sev,
-                                category = category,
-                                description = description,
-                                endpointHostname = endpointHostname,
-                                endpointId = endpointId,
-                                detectedAt = detectedAt,
-                                status = AlertStatus.OPEN,
-                                product = product,
-                                threatName = threatName,
-                                path = path
-                            )
-                        )
+                        if (allAlerts.isNotEmpty()) {
+                            alerts.value = allAlerts.toList()
+                        }
+                    } else {
+                        Log.e(TAG, "Alerts call failed page $pageIndex HTTP ${resp.code}: ${resp.body?.string()}")
+                        pageNextKey = null
                     }
-                    if (list.isNotEmpty()) {
-                        fetchedAlerts = list
-                        alerts.value = list
-                    }
-                } else {
-                    Log.e(TAG, "Alerts call failed HTTP ${resp.code}: ${resp.body?.string()}")
                 }
+
+                nextKey = pageNextKey
+                pageIndex++
+            } while (!nextKey.isNullOrEmpty() && pageIndex <= maxPages)
+
+            if (allAlerts.isNotEmpty()) {
+                fetchedAlerts = allAlerts
+                alerts.value = allAlerts
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception fetching alerts: ${e.message}", e)
@@ -536,13 +704,13 @@ object MockSecurityRepository {
             syncFreshnessTimestamp = "Just now",
             isLiveDataSource = success,
             tenantName = "Sophos Central Production Tenant",
-            dataRegion = "US-West-2 (api-us03)"
+            dataRegion = if (dataRegionUrl.isNotEmpty()) dataRegionUrl.replace("https://", "") else "Sophos Central Cloud"
         )
 
         lastSyncStatus = if (success) {
             "Direct Cloud Connected (${epList.size} Endpoints, ${altList.size} Alerts)"
         } else {
-            "Direct connection attempt finished with fallback"
+            "Direct connection finished with fallback"
         }
 
         isSyncingFlow.value = false

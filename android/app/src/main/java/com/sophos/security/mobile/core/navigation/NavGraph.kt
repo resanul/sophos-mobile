@@ -24,6 +24,7 @@ import com.sophos.security.mobile.feature.detections.*
 import com.sophos.security.mobile.feature.endpoints.*
 import com.sophos.security.mobile.feature.hunting.*
 import com.sophos.security.mobile.feature.more.*
+import com.sophos.security.mobile.core.network.MockSecurityRepository
 
 data class BottomNavItem(
     val title: String,
@@ -100,7 +101,8 @@ fun SophosNavGraph(
             // Auth Flow
             composable(Screen.Splash.route) {
                 SplashScreen(onNavigateToLogin = {
-                    navController.navigate(Screen.Dashboard.route) {
+                    val destination = if (MockSecurityRepository.isLoggedIn) Screen.Dashboard.route else Screen.Login.route
+                    navController.navigate(destination) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 })
@@ -182,6 +184,7 @@ fun SophosNavGraph(
                     onNavigateToDiagnostics = { navController.navigate(Screen.Diagnostics.route) },
                     onNavigateToRecovery = { navController.navigate(Screen.RecoveryState.route) },
                     onLogout = {
+                        MockSecurityRepository.logout()
                         navController.navigate(Screen.Login.route) {
                             popUpTo(0) { inclusive = true }
                         }

@@ -2,9 +2,11 @@ package com.sophos.security.mobile.feature.alerts
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -29,6 +31,7 @@ fun AlertsListScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedSeverity by remember { mutableStateOf<Severity?>(null) }
     val allAlerts by MockSecurityRepository.getAlerts().collectAsState(initial = emptyList())
+    val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
 
     val filteredAlerts = allAlerts.filter { alert ->
         val matchesQuery = searchQuery.isEmpty() ||
@@ -43,7 +46,7 @@ fun AlertsListScreen(
         topBar = {
             SecurityTopBar(
                 title = "Security Alerts",
-                subtitle = "${filteredAlerts.size} events matching criteria",
+                subtitle = if (isSyncing) "${filteredAlerts.size} events (fetching live...)" else "${filteredAlerts.size} events matching criteria",
                 canNavigateBack = false
             )
         },
@@ -55,6 +58,15 @@ fun AlertsListScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
+            if (isSyncing) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    color = SecurityGreen,
+                    trackColor = DarkSurfaceVariant
+                )
+            }
             SearchBarComponent(
                 query = searchQuery,
                 onQueryChange = { searchQuery = it },
@@ -65,7 +77,9 @@ fun AlertsListScreen(
 
             // Severity Filter Pills
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
@@ -102,7 +116,7 @@ fun AlertsListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(filteredAlerts) { alert ->
+                    items(filteredAlerts, key = { it.id }) { alert ->
                         AlertCard(alert = alert, onClick = { onNavigateToAlertDetail(alert.id) })
                     }
                     item { Spacer(modifier = Modifier.height(24.dp)) }
