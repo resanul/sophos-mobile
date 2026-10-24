@@ -34,23 +34,25 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Setup Android SDK Platform & Build-Tools
-        uses: android-actions/setup-android@v3
-
-      - name: Ensure Gradle Wrapper Executable Permissions
+      - name: Ensure Gradle Wrapper Executable
         run: chmod +x android/gradlew
 
-      - name: Run Android Unit Test Suite
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
+
+      - name: Run Android Unit Tests
         working-directory: android
         run: ./gradlew testReleaseUnitTest --no-daemon --stacktrace
+
+      - name: Build Android Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Build Android Debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Build Android Production Release APK
-        working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload Android Release APK
         uses: actions/upload-artifact@v4
@@ -96,12 +98,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install pytest pytest-asyncio httpx
 
       - name: Run Backend Pytest Suite
         run: |
           cd backend
-          pytest tests/ -v
+          python -m pytest tests/ -v
 
   # ============================================================================
   # 3. Automated GitHub Release on Git Tag Push (v*.*.*)

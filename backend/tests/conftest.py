@@ -3,6 +3,21 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.security import create_access_token
+from app.core.config import settings
+from app.services.sophos_client import sophos_client
+
+@pytest.fixture(autouse=True)
+def setup_test_env():
+    prev_env = settings.APP_ENV
+    prev_mock = settings.SOPHOS_MOCK_MODE
+    
+    settings.APP_ENV = "testing"
+    settings.SOPHOS_MOCK_MODE = True
+    
+    yield
+    
+    settings.APP_ENV = prev_env
+    settings.SOPHOS_MOCK_MODE = prev_mock
 
 @pytest_asyncio.fixture
 async def client():
