@@ -1,0 +1,50 @@
+services:
+  gateway:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: sophos_mobile_gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - DEBUG=false
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - DATABASE_URL=postgresql+asyncpg://sophos_user:sophos_secure_password@postgres:5432/sophos_mobile
+      - SECRET_KEY=replace-with-a-secure-random-32-byte-hex-string-for-jwt-signing
+      - SOPHOS_MOCK_MODE=true
+      - SOPHOS_CLIENT_ID=${SOPHOS_CLIENT_ID:-}
+      - SOPHOS_CLIENT_SECRET=${SOPHOS_CLIENT_SECRET:-}
+      - CORS_ORIGINS=http://localhost:8000,http://10.0.2.2:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sophos_net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: sophos_mobile_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=sophos_user
+      - POSTGRES_PASSWORD=sophos_secure_password
+      - POSTGRES_DB=sophos_mobile
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sophos_user -d sophos_mobile"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sophos_net
+
+volumes:
+  postgres_data:
+
+networks:
+  sophos_net:
+    driver: bridge

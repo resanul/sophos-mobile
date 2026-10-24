@@ -1,0 +1,48 @@
+# General
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+
+# Environment & Secrets (NEVER COMMIT CREDENTIALS)
+.env
+.env.local
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+env/
+*.sqlite3
+*.db
+backend/app/sophos_mobile.db
+
+# Android / Gradle
+.gradle/
+build/
+*/build/
+*.apk
+*.aab
+local.properties
+.idea/
+*.iml
+.navigation/
+captures/
+.externalNativeBuild
+.cxx/
+
+# Node / Web / Misc
+node_modules/
+dist/
