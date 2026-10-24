@@ -173,3 +173,13 @@ data class DashboardSummary(
     val tenantName: String = "Enterprise Security Operations Tenant",
     val dataRegion: String = "us-east-1"
 )
+
+@Serializable
+data class SophosCachedData(
+    val endpoints: List<Endpoint> = emptyList(),
+    val alerts: List<Alert> = emptyList(),
+    val summary: DashboardSummary? = null,
+    val tenantId: String = "",
+    val dataRegionUrl: String = "",
+    val cachedAtTimestamp: Long = 0L
+)

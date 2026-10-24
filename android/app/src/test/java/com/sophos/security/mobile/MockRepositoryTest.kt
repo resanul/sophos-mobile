@@ -54,4 +54,18 @@ class MockRepositoryTest {
         val modifiedCase = casesAfter.first { it.id == testCase.id }
         assertEquals(CaseStatus.CONTAINED, modifiedCase.status)
     }
+
+    @Test
+    fun testCachedDataSerialization() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val testCached = com.sophos.security.mobile.core.model.SophosCachedData(
+            tenantId = "test-tenant-123",
+            dataRegionUrl = "https://api-us03.central.sophos.com",
+            cachedAtTimestamp = 1700000000L
+        )
+        val encoded = json.encodeToString(com.sophos.security.mobile.core.model.SophosCachedData.serializer(), testCached)
+        val decoded = json.decodeFromString(com.sophos.security.mobile.core.model.SophosCachedData.serializer(), encoded)
+        assertEquals("test-tenant-123", decoded.tenantId)
+        assertEquals("https://api-us03.central.sophos.com", decoded.dataRegionUrl)
+    }
 }

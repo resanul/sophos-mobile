@@ -1,7 +1,9 @@
 package com.sophos.security.mobile.core.network
 
+import android.content.Context
 import android.util.Log
 import com.sophos.security.mobile.core.model.*
+import com.sophos.security.mobile.core.security.EncryptedStorageManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -272,6 +274,54 @@ object MockSecurityRepository {
     fun getCases(): Flow<List<XdrCase>> = cases.asStateFlow()
     fun getHuntTemplates(): List<ThreatHuntTemplate> = threatHuntTemplates
 
+    fun initStorage(context: Context) {
+        EncryptedStorageManager.init(context)
+        loadEncryptedCache()
+    }
+
+    fun loadEncryptedCache() {
+        try {
+            val decryptedJson = EncryptedStorageManager.readAndDecrypt() ?: return
+            val cached = json.decodeFromString<SophosCachedData>(decryptedJson)
+            if (cached.endpoints.isNotEmpty()) {
+                endpoints.value = cached.endpoints
+            }
+            if (cached.alerts.isNotEmpty()) {
+                alerts.value = cached.alerts
+            }
+            if (cached.summary != null) {
+                dashboardSummary.value = cached.summary.copy(
+                    syncFreshnessTimestamp = "Decrypted Local Cache",
+                    isLiveDataSource = true
+                )
+            }
+            if (cached.tenantId.isNotEmpty()) tenantId = cached.tenantId
+            if (cached.dataRegionUrl.isNotEmpty()) dataRegionUrl = cached.dataRegionUrl
+            isLiveConnected = cached.endpoints.isNotEmpty()
+            lastSyncStatus = "Decrypted Local Cache (${endpoints.value.size} Endpoints, ${alerts.value.size} Alerts)"
+            Log.i(TAG, "Decrypted local cache loaded: ${endpoints.value.size} endpoints, ${alerts.value.size} alerts")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load decrypted local cache: ${e.message}")
+        }
+    }
+
+    fun saveEncryptedCache() {
+        try {
+            val cached = SophosCachedData(
+                endpoints = endpoints.value,
+                alerts = alerts.value,
+                summary = dashboardSummary.value,
+                tenantId = tenantId,
+                dataRegionUrl = dataRegionUrl,
+                cachedAtTimestamp = System.currentTimeMillis()
+            )
+            val jsonString = json.encodeToString(SophosCachedData.serializer(), cached)
+            EncryptedStorageManager.encryptAndSave(jsonString)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save encrypted cache: ${e.message}", e)
+        }
+    }
+
     suspend fun login(userId: String, secret: String): Result<Unit> = withContext(Dispatchers.IO) {
         val trimmedUser = userId.trim()
         val trimmedSecret = secret.trim()
@@ -343,6 +393,9 @@ object MockSecurityRepository {
             } catch (e: Exception) {
                 Log.w(TAG, "Whoami discovery error: ${e.message}")
             }
+
+            // Ensure local encrypted cache is in place so previous data displays instantly
+            loadEncryptedCache()
 
             // Trigger full background sync for all 2,688 endpoints and alerts
             repositoryScope.launch {
@@ -711,6 +764,10 @@ object MockSecurityRepository {
             "Direct Cloud Connected (${epList.size} Endpoints, ${altList.size} Alerts)"
         } else {
             "Direct connection finished with fallback"
+        }
+
+        if (success) {
+            saveEncryptedCache()
         }
 
         isSyncingFlow.value = false
