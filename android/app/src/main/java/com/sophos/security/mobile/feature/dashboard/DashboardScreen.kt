@@ -33,7 +33,8 @@ fun DashboardScreen(
     onNavigateToDetections: () -> Unit,
     onNavigateToHunt: () -> Unit,
     onNavigateToDiagnostics: () -> Unit,
-    onNavigateToAlertDetail: (String) -> Unit
+    onNavigateToAlertDetail: (String) -> Unit,
+    onNavigateToWebActivity: () -> Unit = {}
 ) {
     val summary by MockSecurityRepository.getDashboardSummaryFlow().collectAsState(initial = MockSecurityRepository.getDashboardSummary())
     val alerts by MockSecurityRepository.getAlerts().collectAsState(initial = emptyList())
@@ -186,6 +187,16 @@ fun DashboardScreen(
                         Icon(Icons.Default.ManageSearch, contentDescription = null, tint = SecurityGreen, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Hunt XDR", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Button(
+                        onClick = onNavigateToWebActivity,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Web Logs", color = Color.White, style = MaterialTheme.typography.labelSmall)
                     }
                     Button(
                         onClick = onNavigateToEndpoints,

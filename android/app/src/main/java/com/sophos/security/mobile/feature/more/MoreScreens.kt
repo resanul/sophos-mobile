@@ -38,6 +38,7 @@ fun MoreMenuScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToDiagnostics: () -> Unit,
     onNavigateToRecovery: () -> Unit,
+    onNavigateToWebActivity: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     Scaffold(
@@ -94,6 +95,14 @@ fun MoreMenuScreen(
                     title = "Audit History",
                     subtitle = "Immutable record of all analyst response actions",
                     onClick = onNavigateToAudit
+                )
+            }
+            item {
+                MenuItem(
+                    icon = Icons.Default.Language,
+                    title = "Web Browsing Activity & Web Control Logs",
+                    subtitle = "Live browsing monitoring, blocked sites, DNS requests",
+                    onClick = onNavigateToWebActivity
                 )
             }
             item {

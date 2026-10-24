@@ -159,6 +159,29 @@ data class CapabilityService(
 )
 
 @Serializable
+enum class WebAction {
+    BLOCKED, WARNED, ALLOWED, AUDITED, PROCEEDED
+}
+
+@Serializable
+data class WebActivityLog(
+    val id: String,
+    val username: String,
+    val endpointHostname: String,
+    val endpointId: String,
+    val isServer: Boolean = false,
+    val domain: String,
+    val fullUrl: String = "",
+    val category: String,
+    val action: WebAction,
+    val timestamp: String,
+    val browser: String = "Google Chrome",
+    val dataTransferred: String = "1.2 MB",
+    val clientIp: String = "10.14.2.144",
+    val policyRule: String = "Enterprise Acceptable Web Use Policy"
+)
+
+@Serializable
 data class DashboardSummary(
     val totalEndpoints: Int,
     val activeEndpoints: Int = 0,
@@ -180,6 +203,7 @@ data class DashboardSummary(
 data class SophosCachedData(
     val endpoints: List<Endpoint> = emptyList(),
     val alerts: List<Alert> = emptyList(),
+    val webLogs: List<WebActivityLog> = emptyList(),
     val summary: DashboardSummary? = null,
     val tenantId: String = "",
     val dataRegionUrl: String = "",

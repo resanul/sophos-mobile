@@ -247,6 +247,147 @@ object MockSecurityRepository {
             mitreTactic = "Credential Access",
             querySql = "SELECT event_id, target_user, service_name, ticket_encryption_type FROM xdr_data_lake_windows_events WHERE event_id = 4769 AND ticket_encryption_type = '0x17' LIMIT 100;",
             parameters = listOf("Domain: CORP.LOCAL")
+        ),
+        ThreatHuntTemplate(
+            id = "th-tmpl-03",
+            name = "Web Browsing Activity & Web Control Logs",
+            description = "Query Sophos Data Lake for all HTTP/HTTPS DNS requests, visited domains, and web filtering blocks across all endpoints",
+            mitreTactic = "Initial Access / Command and Control (T1071.001)",
+            querySql = "SELECT time, username, host_identifier, query AS domain, process_name, remote_address FROM xdr_data_lake_dns_activity ORDER BY time DESC LIMIT 100;",
+            parameters = listOf("TimeRange: 24h", "Protocol: DNS/HTTPS")
+        )
+    )
+
+    private val webLogs = MutableStateFlow(
+        listOf(
+            WebActivityLog(
+                id = "web-log-01",
+                username = "corp\\sarah.khan",
+                endpointHostname = "FIN-WS-4091",
+                endpointId = "ep-us-prod-02",
+                isServer = false,
+                domain = "facebook.com",
+                fullUrl = "https://www.facebook.com/login",
+                category = "Social Networking",
+                action = WebAction.BLOCKED,
+                timestamp = "3 mins ago",
+                browser = "Google Chrome",
+                dataTransferred = "1.8 MB",
+                clientIp = "10.14.2.144",
+                policyRule = "Corporate Acceptable Use - Block Social Networks"
+            ),
+            WebActivityLog(
+                id = "web-log-02",
+                username = "dev\\alex.turner",
+                endpointHostname = "ENG-UBUNTU-DEV08",
+                endpointId = "ep-us-prod-03",
+                isServer = false,
+                domain = "chatgpt.com",
+                fullUrl = "https://chatgpt.com",
+                category = "Generative AI",
+                action = WebAction.ALLOWED,
+                timestamp = "8 mins ago",
+                browser = "Mozilla Firefox",
+                dataTransferred = "4.2 MB",
+                clientIp = "10.14.5.88",
+                policyRule = "Productivity Allowed - AI Tools Audit"
+            ),
+            WebActivityLog(
+                id = "web-log-03",
+                username = "finance\\kabir.hassan",
+                endpointHostname = "FIN-WS-3012",
+                endpointId = "ep-us-prod-02",
+                isServer = false,
+                domain = "online-casino-vip.com",
+                fullUrl = "https://online-casino-vip.com/play",
+                category = "Adult & Gambling",
+                action = WebAction.BLOCKED,
+                timestamp = "14 mins ago",
+                browser = "Microsoft Edge",
+                dataTransferred = "340 KB",
+                clientIp = "10.14.2.190",
+                policyRule = "Strict Security - Block High Risk & Gambling"
+            ),
+            WebActivityLog(
+                id = "web-log-04",
+                username = "sales\\rahim.ahmed",
+                endpointHostname = "SALES-LAPTOP-04",
+                endpointId = "ep-us-prod-03",
+                isServer = false,
+                domain = "youtube.com",
+                fullUrl = "https://www.youtube.com/watch?v=tech-review",
+                category = "Streaming Media",
+                action = WebAction.WARNED,
+                timestamp = "22 mins ago",
+                browser = "Google Chrome",
+                dataTransferred = "48.6 MB",
+                clientIp = "10.14.8.99",
+                policyRule = "Bandwidth Optimization - Warn on Video Streaming"
+            ),
+            WebActivityLog(
+                id = "web-log-05",
+                username = "it\\admin.mike",
+                endpointHostname = "SEC-CORP-DC01",
+                endpointId = "ep-us-prod-01",
+                isServer = true,
+                domain = "wetransfer.com",
+                fullUrl = "https://wetransfer.com/upload",
+                category = "Cloud Storage & File Transfer",
+                action = WebAction.WARNED,
+                timestamp = "35 mins ago",
+                browser = "Microsoft Edge",
+                dataTransferred = "124.0 MB",
+                clientIp = "10.14.0.5",
+                policyRule = "DLP Protection - Audit Large Cloud File Transfers"
+            ),
+            WebActivityLog(
+                id = "web-log-06",
+                username = "ops\\tanvir.alam",
+                endpointHostname = "APP-K8S-NODE-03",
+                endpointId = "ep-us-prod-04",
+                isServer = true,
+                domain = "malicious-c2-beacon.top",
+                fullUrl = "http://malicious-c2-beacon.top/sync",
+                category = "Command & Control / Malicious",
+                action = WebAction.BLOCKED,
+                timestamp = "42 mins ago",
+                browser = "curl/8.5.0",
+                dataTransferred = "42 KB",
+                clientIp = "10.14.8.21",
+                policyRule = "Sophos Threat Intelligence - Malicious URL Intercept"
+            ),
+            WebActivityLog(
+                id = "web-log-07",
+                username = "hr\\nusrat.jahan",
+                endpointHostname = "HR-WS-201",
+                endpointId = "ep-us-prod-02",
+                isServer = false,
+                domain = "linkedin.com",
+                fullUrl = "https://www.linkedin.com/jobs",
+                category = "Job Search & Careers",
+                action = WebAction.AUDITED,
+                timestamp = "1 hour ago",
+                browser = "Google Chrome",
+                dataTransferred = "5.1 MB",
+                clientIp = "10.14.3.44",
+                policyRule = "Corporate Monitor - Audit Job Search"
+            ),
+            WebActivityLog(
+                id = "web-log-08",
+                username = "corp\\sarah.khan",
+                endpointHostname = "FIN-WS-4091",
+                endpointId = "ep-us-prod-02",
+                isServer = false,
+                domain = "torrent-download.org",
+                fullUrl = "https://torrent-download.org/search",
+                category = "Peer-to-Peer & Warez",
+                action = WebAction.BLOCKED,
+                timestamp = "1.5 hours ago",
+                browser = "Google Chrome",
+                dataTransferred = "890 KB",
+                clientIp = "10.14.2.144",
+                policyRule = "Network Security - Block P2P and Copyright Violation"
+            )
         )
     )
 
@@ -280,6 +421,7 @@ object MockSecurityRepository {
 
     fun getEndpoints(): Flow<List<Endpoint>> = endpoints.asStateFlow()
     fun getAlerts(): Flow<List<Alert>> = alerts.asStateFlow()
+    fun getWebLogs(): Flow<List<WebActivityLog>> = webLogs.asStateFlow()
     fun getDetections(): Flow<List<Detection>> = detections.asStateFlow()
     fun getCases(): Flow<List<XdrCase>> = cases.asStateFlow()
     fun getHuntTemplates(): List<ThreatHuntTemplate> = threatHuntTemplates
@@ -299,6 +441,9 @@ object MockSecurityRepository {
             if (cached.alerts.isNotEmpty()) {
                 alerts.value = cached.alerts
             }
+            if (cached.webLogs.isNotEmpty()) {
+                webLogs.value = cached.webLogs
+            }
             if (cached.summary != null) {
                 val activeCount = if (cached.summary.activeEndpoints > 0) cached.summary.activeEndpoints else cached.endpoints.count { it.online }
                 dashboardSummary.value = cached.summary.copy(
@@ -311,7 +456,7 @@ object MockSecurityRepository {
             if (cached.dataRegionUrl.isNotEmpty()) dataRegionUrl = cached.dataRegionUrl
             isLiveConnected = cached.endpoints.isNotEmpty()
             lastSyncStatus = "Decrypted Local Cache (${endpoints.value.size} Endpoints, ${alerts.value.size} Alerts)"
-            Log.i(TAG, "Decrypted local cache loaded: ${endpoints.value.size} endpoints, ${alerts.value.size} alerts")
+            Log.i(TAG, "Decrypted local cache loaded: ${endpoints.value.size} endpoints, ${alerts.value.size} alerts, ${webLogs.value.size} web logs")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load decrypted local cache: ${e.message}")
         }
@@ -322,6 +467,7 @@ object MockSecurityRepository {
             val cached = SophosCachedData(
                 endpoints = endpoints.value,
                 alerts = alerts.value,
+                webLogs = webLogs.value,
                 summary = dashboardSummary.value,
                 tenantId = tenantId,
                 dataRegionUrl = dataRegionUrl,

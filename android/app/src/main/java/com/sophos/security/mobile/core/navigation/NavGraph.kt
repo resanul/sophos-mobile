@@ -24,6 +24,7 @@ import com.sophos.security.mobile.feature.detections.*
 import com.sophos.security.mobile.feature.endpoints.*
 import com.sophos.security.mobile.feature.hunting.*
 import com.sophos.security.mobile.feature.more.*
+import com.sophos.security.mobile.feature.webactivity.WebActivityScreen
 import com.sophos.security.mobile.core.network.MockSecurityRepository
 
 data class BottomNavItem(
@@ -81,6 +82,7 @@ fun SophosNavGraph(
                                 Screen.ServiceCatalog.route,
                                 Screen.UserProfile.route,
                                 Screen.Settings.route,
+                                Screen.WebActivity.route,
                                 Screen.RecoveryState.route
                             )
                             else -> currentRoute == item.route
@@ -184,6 +186,7 @@ fun SophosNavGraph(
                     onNavigateToDetections = { navController.navigate(Screen.Detections.route) },
                     onNavigateToHunt = { navController.navigate(Screen.ThreatHunting.route) },
                     onNavigateToDiagnostics = { navController.navigate(Screen.Diagnostics.route) },
+                    onNavigateToWebActivity = { navController.navigate(Screen.WebActivity.route) },
                     onNavigateToAlertDetail = { alertId ->
                         navController.navigate(Screen.AlertDetail.createRoute(alertId))
                     }
@@ -222,6 +225,7 @@ fun SophosNavGraph(
                     onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                     onNavigateToDiagnostics = { navController.navigate(Screen.Diagnostics.route) },
                     onNavigateToRecovery = { navController.navigate(Screen.RecoveryState.route) },
+                    onNavigateToWebActivity = { navController.navigate(Screen.WebActivity.route) },
                     onLogout = {
                         MockSecurityRepository.logout()
                         navController.navigate(Screen.Login.route) {
@@ -376,6 +380,14 @@ fun SophosNavGraph(
             }
             composable(Screen.Diagnostics.route) {
                 DiagnosticsScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable(Screen.WebActivity.route) {
+                WebActivityScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToEndpoint = { epId ->
+                        navController.navigate(Screen.EndpointDetail.createRoute(epId))
+                    }
+                )
             }
             composable(Screen.RecoveryState.route) {
                 RecoveryStateScreen(onNavigateBack = { navController.popBackStack() })

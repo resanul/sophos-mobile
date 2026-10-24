@@ -169,6 +169,21 @@ fun InvestigationScreen(
                     border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Host: FIN-WS-4091 | User: corp\\sarah.khan | Time: 3 mins ago", style = MaterialTheme.typography.labelSmall, color = SecurityGreen)
+                        Text("Domain: facebook.com (Web Control Policy Violation)", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color.White)
+                        Text("Enforced Action: BLOCKED | Category: Social Networking | Browser: Chrome", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = SeverityCritical)
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text("Host: SEC-CORP-DC01 | Time: 2026-10-24 05:48:12Z", style = MaterialTheme.typography.labelSmall, color = SecurityGreen)
                         Text("Process: C:\\Windows\\System32\\mshta.exe", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color.White)
                         Text("CmdLine: vbscript:Close(Execute(\"CreateObject(\"\"Wscript.Shell\"\").Run...\"))", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = SeverityHigh)

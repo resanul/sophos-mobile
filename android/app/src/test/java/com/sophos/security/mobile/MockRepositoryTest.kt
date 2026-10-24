@@ -90,4 +90,13 @@ class MockRepositoryTest {
         MockSecurityRepository.setEndpointFilter("ALL")
         assertEquals("ALL", MockSecurityRepository.endpointFilter.value)
     }
+
+    @Test
+    fun testWebActivityLogs() = runTest {
+        val logs = MockSecurityRepository.getWebLogs().first()
+        assertTrue(logs.isNotEmpty())
+        val blockedLogs = logs.filter { it.action == com.sophos.security.mobile.core.model.WebAction.BLOCKED }
+        assertTrue(blockedLogs.isNotEmpty())
+        assertTrue(logs.any { it.domain.contains("facebook.com") })
+    }
 }
