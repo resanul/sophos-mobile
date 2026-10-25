@@ -406,9 +406,35 @@ object MockSecurityRepository {
     }
 
     fun refresh() {
+        val creds = EncryptedStorageManager.getActiveCredentials()
+        if (creds != null) {
+            clientId = creds.first
+            clientSecret = creds.second
+        }
         if (clientId.isBlank() || clientSecret.isBlank()) return
         repositoryScope.launch {
             syncDirectFromSophosCentral()
+        }
+    }
+
+    fun refreshWebLogs7Days(onComplete: (Int) -> Unit = {}) {
+        val creds = EncryptedStorageManager.getActiveCredentials()
+        if (creds != null) {
+            clientId = creds.first
+            clientSecret = creds.second
+        }
+        if (clientId.isBlank() || clientSecret.isBlank()) {
+            onComplete(webLogs.value.size)
+            return
+        }
+        repositoryScope.launch {
+            try {
+                isSyncingFlow.value = true
+                syncDirectFromSophosCentral()
+            } finally {
+                isSyncingFlow.value = false
+                onComplete(webLogs.value.size)
+            }
         }
     }
 
@@ -713,124 +739,247 @@ object MockSecurityRepository {
             Log.e(TAG, "Exception fetching alerts: ${e.message}", e)
         }
 
-        // 3. Direct SIEM Events Fetch for Live Web Control and Security Detections
+        // 3. Direct SIEM Events Fetch & Data Lake Telemetry for Live Web Control and Detections
         try {
             lastSyncStatus = "Loading live web control & SIEM telemetry..."
-            val eventReq = Request.Builder()
-                .url("$dataRegionUrl/siem/v1/events?limit=500")
-                .header("Authorization", "Bearer $token")
-                .header("X-Tenant-ID", tenantId)
-                .get()
-                .build()
-
             val liveWebLogs = mutableListOf<WebActivityLog>()
             val liveDetections = mutableListOf<Detection>()
 
-            okHttpClient.newCall(eventReq).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: "{}"
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+            // 3A. Fetch SIEM events with cursor pagination
+            var currentCursor: String? = null
+            var pagesFetched = 0
+            val maxPages = 5
 
-                    for (elem in items) {
-                        val evObj = elem.jsonObject
-                        val id = evObj["id"]?.jsonPrimitive?.contentOrNull ?: java.util.UUID.randomUUID().toString()
-                        val type = evObj["type"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val group = evObj["group"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val location = evObj["location"]?.jsonPrimitive?.contentOrNull
-                            ?: evObj["endpoint"]?.jsonObject?.get("hostname")?.jsonPrimitive?.contentOrNull
-                            ?: "Managed Endpoint"
-                        val epId = evObj["endpoint_id"]?.jsonPrimitive?.contentOrNull
-                            ?: evObj["endpoint"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
-                            ?: ""
-                        val user = evObj["user"]?.jsonPrimitive?.contentOrNull ?: "system"
-                        val whenTime = evObj["when"]?.jsonPrimitive?.contentOrNull
-                            ?: evObj["created_at"]?.jsonPrimitive?.contentOrNull
-                            ?: "Recently"
-                        val description = evObj["description"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val name = evObj["name"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val rawUrl = evObj["url"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val appName = evObj["app_name"]?.jsonPrimitive?.contentOrNull ?: "Web Browser"
-                        val isServer = evObj["endpoint_type"]?.jsonPrimitive?.contentOrNull?.equals("server", ignoreCase = true) ?: false
+            do {
+                val urlBuilder = if (currentCursor != null) {
+                    "$dataRegionUrl/siem/v1/events?cursor=$currentCursor"
+                } else {
+                    val fromDateEpoch = (System.currentTimeMillis() / 1000) - (23 * 3600)
+                    "$dataRegionUrl/siem/v1/events?limit=500&from_date=$fromDateEpoch"
+                }
 
-                        // Check if event relates to Web Filtering / Web Control / DNS
-                        if (group.equals("WEB", ignoreCase = true) ||
-                            type.contains("Web", ignoreCase = true) ||
-                            rawUrl.isNotEmpty() ||
-                            description.contains("http", ignoreCase = true) ||
-                            description.contains("url", ignoreCase = true) ||
-                            name.contains("Web", ignoreCase = true)
-                        ) {
-                            val targetUrl = if (rawUrl.isNotEmpty()) rawUrl else extractUrlFromText(description.ifEmpty { name })
-                            val domain = extractDomain(targetUrl)
-                            val action = when {
-                                type.contains("Violation", ignoreCase = true) || type.contains("Block", ignoreCase = true) -> WebAction.BLOCKED
-                                type.contains("Warn", ignoreCase = true) -> WebAction.WARNED
-                                type.contains("Audit", ignoreCase = true) -> WebAction.AUDITED
-                                else -> WebAction.ALLOWED
-                            }
-                            val category = evObj["category"]?.jsonPrimitive?.contentOrNull
-                                ?: if (group.isNotEmpty()) group else "Web Filtering"
+                val eventReq = Request.Builder()
+                    .url(urlBuilder)
+                    .header("Authorization", "Bearer $token")
+                    .header("X-Tenant-ID", tenantId)
+                    .get()
+                    .build()
 
-                            liveWebLogs.add(
-                                WebActivityLog(
-                                    id = id,
-                                    username = user,
-                                    endpointHostname = location,
-                                    endpointId = epId,
-                                    isServer = isServer,
-                                    domain = domain,
-                                    fullUrl = targetUrl,
-                                    category = category,
-                                    action = action,
-                                    timestamp = formatIsoTimestamp(whenTime),
-                                    browser = appName,
-                                    dataTransferred = "—",
-                                    clientIp = evObj["endpoint_ip"]?.jsonPrimitive?.contentOrNull ?: "—",
-                                    policyRule = description.ifEmpty { name.ifEmpty { "Sophos Web Filtering Policy" } }
+                var hasMore = false
+                okHttpClient.newCall(eventReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: "{}"
+                        val root = json.parseToJsonElement(body).jsonObject
+                        hasMore = root["has_more"]?.jsonPrimitive?.booleanOrNull ?: false
+                        currentCursor = root["next_cursor"]?.jsonPrimitive?.contentOrNull
+                        val items = root["items"]?.jsonArray ?: JsonArray(emptyList())
+
+                        for (elem in items) {
+                            val evObj = elem.jsonObject
+                            val id = evObj["id"]?.jsonPrimitive?.contentOrNull ?: java.util.UUID.randomUUID().toString()
+                            val type = evObj["type"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val group = evObj["group"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val location = evObj["location"]?.jsonPrimitive?.contentOrNull
+                                ?: evObj["endpoint"]?.jsonObject?.get("hostname")?.jsonPrimitive?.contentOrNull
+                                ?: "Managed Endpoint"
+                            val epId = evObj["endpoint_id"]?.jsonPrimitive?.contentOrNull
+                                ?: evObj["endpoint"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+                                ?: ""
+                            val user = evObj["user"]?.jsonPrimitive?.contentOrNull ?: "system"
+                            val whenTime = evObj["when"]?.jsonPrimitive?.contentOrNull
+                                ?: evObj["created_at"]?.jsonPrimitive?.contentOrNull
+                                ?: "Recently"
+                            val description = evObj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val name = evObj["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val rawUrl = evObj["url"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val appName = evObj["app_name"]?.jsonPrimitive?.contentOrNull ?: "Web Browser"
+                            val isServer = evObj["endpoint_type"]?.jsonPrimitive?.contentOrNull?.equals("server", ignoreCase = true) ?: false
+
+                            // Check if event relates to Web Filtering / Web Control / DNS
+                            if (group.equals("WEB", ignoreCase = true) ||
+                                type.contains("Web", ignoreCase = true) ||
+                                rawUrl.isNotEmpty() ||
+                                description.contains("http", ignoreCase = true) ||
+                                description.contains("url", ignoreCase = true) ||
+                                name.contains("Web", ignoreCase = true)
+                            ) {
+                                val targetUrl = if (rawUrl.isNotEmpty()) rawUrl else extractUrlFromText(description.ifEmpty { name })
+                                val domain = extractDomain(targetUrl)
+                                val action = when {
+                                    type.contains("Violation", ignoreCase = true) || type.contains("Block", ignoreCase = true) -> WebAction.BLOCKED
+                                    type.contains("Warn", ignoreCase = true) -> WebAction.WARNED
+                                    type.contains("Audit", ignoreCase = true) -> WebAction.AUDITED
+                                    else -> WebAction.ALLOWED
+                                }
+                                val category = evObj["category"]?.jsonPrimitive?.contentOrNull
+                                    ?: if (group.isNotEmpty()) group else "Web Filtering"
+
+                                liveWebLogs.add(
+                                    WebActivityLog(
+                                        id = id,
+                                        username = user,
+                                        endpointHostname = location,
+                                        endpointId = epId,
+                                        isServer = isServer,
+                                        domain = domain,
+                                        fullUrl = targetUrl,
+                                        category = category,
+                                        action = action,
+                                        timestamp = formatIsoTimestamp(whenTime),
+                                        browser = appName,
+                                        dataTransferred = "—",
+                                        clientIp = evObj["endpoint_ip"]?.jsonPrimitive?.contentOrNull ?: "—",
+                                        policyRule = description.ifEmpty { name.ifEmpty { "Sophos Web Filtering Policy" } }
+                                    )
                                 )
-                            )
-                        }
-
-                        // Check if event is an XDR Detection
-                        if (group.uppercase() in listOf("MALWARE", "THREAT", "EXPLOIT", "APPLICATION_CONTROL", "SECURITY") ||
-                            type.contains("Threat", ignoreCase = true) ||
-                            type.contains("Malware", ignoreCase = true)
-                        ) {
-                            val sevStr = evObj["severity"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
-                            val sev = when (sevStr) {
-                                "CRITICAL" -> Severity.CRITICAL
-                                "HIGH" -> Severity.HIGH
-                                "LOW" -> Severity.LOW
-                                "INFO" -> Severity.INFO
-                                else -> Severity.MEDIUM
                             }
-                            liveDetections.add(
-                                Detection(
-                                    id = id,
-                                    severity = sev,
-                                    title = name.ifEmpty { description.ifEmpty { "Security Incident ($type)" } },
-                                    category = group.ifEmpty { type },
-                                    targetEndpoint = location,
-                                    endpointId = epId,
-                                    riskScore = when (sev) {
-                                        Severity.CRITICAL -> 92
-                                        Severity.HIGH -> 80
-                                        Severity.MEDIUM -> 55
-                                        Severity.LOW -> 30
-                                        Severity.INFO -> 10
-                                    },
-                                    mitreTechniques = emptyList(),
-                                    detectedAt = formatIsoTimestamp(whenTime),
-                                    status = "Active Telemetry",
-                                    processPath = appName,
-                                    sha256 = evObj["sha256"]?.jsonPrimitive?.contentOrNull ?: ""
+
+                            // Check if event is an XDR Detection
+                            if (group.uppercase() in listOf("MALWARE", "THREAT", "EXPLOIT", "APPLICATION_CONTROL", "SECURITY") ||
+                                type.contains("Threat", ignoreCase = true) ||
+                                type.contains("Malware", ignoreCase = true)
+                            ) {
+                                val sevStr = evObj["severity"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
+                                val sev = when (sevStr) {
+                                    "CRITICAL" -> Severity.CRITICAL
+                                    "HIGH" -> Severity.HIGH
+                                    "LOW" -> Severity.LOW
+                                    "INFO" -> Severity.INFO
+                                    else -> Severity.MEDIUM
+                                }
+                                liveDetections.add(
+                                    Detection(
+                                        id = id,
+                                        severity = sev,
+                                        title = name.ifEmpty { description.ifEmpty { "Security Incident ($type)" } },
+                                        category = group.ifEmpty { type },
+                                        targetEndpoint = location,
+                                        endpointId = epId,
+                                        riskScore = when (sev) {
+                                            Severity.CRITICAL -> 92
+                                            Severity.HIGH -> 80
+                                            Severity.MEDIUM -> 55
+                                            Severity.LOW -> 30
+                                            Severity.INFO -> 10
+                                        },
+                                        mitreTechniques = emptyList(),
+                                        detectedAt = formatIsoTimestamp(whenTime),
+                                        status = "Active Telemetry",
+                                        processPath = appName,
+                                        sha256 = evObj["sha256"]?.jsonPrimitive?.contentOrNull ?: ""
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
+                pagesFetched++
+            } while (hasMore && currentCursor != null && pagesFetched < maxPages)
+
+            // 3B. Extract any web-related incidents from alerts in the 7-day window
+            for (alert in alerts.value) {
+                if (alert.category.contains("web", ignoreCase = true) ||
+                    alert.description.contains("http", ignoreCase = true) ||
+                    alert.threatName.contains("url", ignoreCase = true) ||
+                    alert.threatName.contains("mal/", ignoreCase = true)
+                ) {
+                    val url = extractUrlFromText(alert.description.ifEmpty { alert.path })
+                    val domain = extractDomain(url.ifEmpty { alert.threatName })
+                    if (liveWebLogs.none { it.id == alert.id }) {
+                        liveWebLogs.add(
+                            WebActivityLog(
+                                id = alert.id,
+                                username = "endpoint_user",
+                                endpointHostname = alert.endpointHostname,
+                                endpointId = alert.endpointId,
+                                isServer = false,
+                                domain = domain,
+                                fullUrl = url,
+                                category = alert.category,
+                                action = WebAction.BLOCKED,
+                                timestamp = alert.detectedAt,
+                                browser = "Sophos Web Protection",
+                                dataTransferred = "—",
+                                clientIp = "—",
+                                policyRule = alert.description
+                            )
+                        )
+                    }
+                }
             }
+
+            // 3C. Attempt Sophos XDR Data Lake 7-day query
+            try {
+                val sevenDaysAgoIso = java.time.Instant.now().minus(java.time.Duration.ofDays(7)).toString()
+                val nowIso = java.time.Instant.now().toString()
+                val xdrBody = """
+                    {
+                        "adHocQuery": {
+                            "template": "SELECT meta_hostname, username, url, domain, web_category, time, action FROM xdr_data WHERE time >= '$sevenDaysAgoIso' LIMIT 500"
+                        },
+                        "from": "$sevenDaysAgoIso",
+                        "to": "$nowIso"
+                    }
+                """.trimIndent()
+                val xdrReq = Request.Builder()
+                    .url("$dataRegionUrl/xdr-query/v1/queries/runs")
+                    .header("Authorization", "Bearer $token")
+                    .header("X-Tenant-ID", tenantId)
+                    .header("Content-Type", "application/json")
+                    .post(xdrBody.toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                okHttpClient.newCall(xdrReq).execute().use { xdrResp ->
+                    if (xdrResp.isSuccessful) {
+                        val xdrJson = json.parseToJsonElement(xdrResp.body?.string() ?: "{}").jsonObject
+                        val runId = xdrJson["id"]?.jsonPrimitive?.contentOrNull
+                        if (runId != null) {
+                            val resultsReq = Request.Builder()
+                                .url("$dataRegionUrl/xdr-query/v1/queries/runs/$runId/results?pageSize=500")
+                                .header("Authorization", "Bearer $token")
+                                .header("X-Tenant-ID", tenantId)
+                                .get()
+                                .build()
+                            okHttpClient.newCall(resultsReq).execute().use { resResp ->
+                                if (resResp.isSuccessful) {
+                                    val resJson = json.parseToJsonElement(resResp.body?.string() ?: "{}").jsonObject
+                                    val rows = resJson["items"]?.jsonArray ?: JsonArray(emptyList())
+                                    for (row in rows) {
+                                        val rObj = row.jsonObject
+                                        val host = rObj["meta_hostname"]?.jsonPrimitive?.contentOrNull ?: "Managed Endpoint"
+                                        val uName = rObj["username"]?.jsonPrimitive?.contentOrNull ?: "corp_user"
+                                        val url = rObj["url"]?.jsonPrimitive?.contentOrNull ?: ""
+                                        val dom = rObj["domain"]?.jsonPrimitive?.contentOrNull ?: extractDomain(url)
+                                        val cat = rObj["web_category"]?.jsonPrimitive?.contentOrNull ?: "General Web"
+                                        val actStr = rObj["action"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "ALLOWED"
+                                        val tStr = rObj["time"]?.jsonPrimitive?.contentOrNull ?: "Recently"
+                                        liveWebLogs.add(
+                                            WebActivityLog(
+                                                id = java.util.UUID.randomUUID().toString(),
+                                                username = uName,
+                                                endpointHostname = host,
+                                                endpointId = "",
+                                                domain = dom,
+                                                fullUrl = url,
+                                                category = cat,
+                                                action = if (actStr == "BLOCKED") WebAction.BLOCKED else if (actStr == "WARNED") WebAction.WARNED else WebAction.ALLOWED,
+                                                timestamp = formatIsoTimestamp(tStr),
+                                                browser = "Managed Browser",
+                                                dataTransferred = "—",
+                                                clientIp = "—",
+                                                policyRule = "Data Lake 7-Day Live Discover"
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (xdrEx: Exception) {
+                Log.d(TAG, "Data Lake 7-day query skipped or unpermitted: ${xdrEx.message}")
+            }
+
             webLogs.value = liveWebLogs
             detections.value = liveDetections
         } catch (e: Exception) {

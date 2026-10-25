@@ -33,17 +33,32 @@ fun WebActivityScreen(
     onNavigateToEndpoint: (String) -> Unit
 ) {
     val webLogs by MockSecurityRepository.getWebLogs().collectAsState(initial = emptyList())
+    val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") } // ALL, BLOCKED, WARNED, ALLOWED, SOCIAL, STREAMING, CLOUD, AI
+    var selectedTimeRange by remember { mutableStateOf("7D") } // 7D, 24H, ALL
     var selectedLogForDetail by remember { mutableStateOf<WebActivityLog?>(null) }
 
-    val blockedCount = remember(webLogs) { webLogs.count { it.action == WebAction.BLOCKED } }
-    val warnedCount = remember(webLogs) { webLogs.count { it.action == WebAction.WARNED } }
-    val allowedCount = remember(webLogs) { webLogs.count { it.action == WebAction.ALLOWED || it.action == WebAction.AUDITED } }
-    val uniqueUsersCount = remember(webLogs) { webLogs.map { it.username }.distinct().size }
+    val timeFilteredLogs = remember(webLogs, selectedTimeRange) {
+        when (selectedTimeRange) {
+            "24H" -> webLogs.filter {
+                it.timestamp.contains("mins ago", ignoreCase = true) ||
+                it.timestamp.contains("hours ago", ignoreCase = true) ||
+                it.timestamp.equals("Just now", ignoreCase = true) ||
+                it.timestamp.equals("Recently", ignoreCase = true)
+            }
+            "7D" -> webLogs // In Sophos SIEM & Data Lake, 7D covers all ingested logs up to 7 days
+            else -> webLogs
+        }
+    }
 
-    val filteredLogs = remember(webLogs, searchQuery, selectedFilter) {
-        webLogs.filter { log ->
+    val blockedCount = remember(timeFilteredLogs) { timeFilteredLogs.count { it.action == WebAction.BLOCKED } }
+    val warnedCount = remember(timeFilteredLogs) { timeFilteredLogs.count { it.action == WebAction.WARNED } }
+    val allowedCount = remember(timeFilteredLogs) { timeFilteredLogs.count { it.action == WebAction.ALLOWED || it.action == WebAction.AUDITED } }
+    val uniqueUsersCount = remember(timeFilteredLogs) { timeFilteredLogs.map { it.username }.distinct().size }
+
+    val filteredLogs = remember(timeFilteredLogs, searchQuery, selectedFilter) {
+        timeFilteredLogs.filter { log ->
             val matchesQuery = searchQuery.isEmpty() ||
                     log.domain.contains(searchQuery, ignoreCase = true) ||
                     log.fullUrl.contains(searchQuery, ignoreCase = true) ||
@@ -70,7 +85,7 @@ fun WebActivityScreen(
         topBar = {
             SecurityTopBar(
                 title = "Web Browsing & Control Logs",
-                subtitle = "${filteredLogs.size} web activity events monitored",
+                subtitle = "${filteredLogs.size} events in $selectedTimeRange window",
                 canNavigateBack = true,
                 onNavigateBack = onNavigateBack
             )
@@ -84,6 +99,61 @@ fun WebActivityScreen(
                 .padding(horizontal = 16.dp)
         ) {
             Spacer(modifier = Modifier.height(8.dp))
+
+            // Time Range & Live Discover Bar
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = selectedTimeRange == "7D",
+                            onClick = { selectedTimeRange = "7D" },
+                            label = { Text("Last 7 Days", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "7D") FontWeight.Bold else FontWeight.Normal) }
+                        )
+                        FilterChip(
+                            selected = selectedTimeRange == "24H",
+                            onClick = { selectedTimeRange = "24H" },
+                            label = { Text("24 Hours", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "24H") FontWeight.Bold else FontWeight.Normal) }
+                        )
+                        FilterChip(
+                            selected = selectedTimeRange == "ALL",
+                            onClick = { selectedTimeRange = "ALL" },
+                            label = { Text("All", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "ALL") FontWeight.Bold else FontWeight.Normal) }
+                        )
+                    }
+
+                    FilledTonalButton(
+                        onClick = { MockSecurityRepository.refreshWebLogs7Days() },
+                        enabled = !isSyncing,
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = SecurityGreen.copy(alpha = 0.15f), contentColor = SecurityGreen),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = SecurityGreen, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (isSyncing) "SYNCING..." else "SCAN 7D", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Search Bar
             SearchBarComponent(
@@ -101,7 +171,7 @@ fun WebActivityScreen(
             ) {
                 WebMiniMetricCard(
                     title = "Total Events",
-                    value = webLogs.size.toString(),
+                    value = timeFilteredLogs.size.toString(),
                     color = Color.White,
                     modifier = Modifier.weight(1f)
                 )
@@ -137,7 +207,7 @@ fun WebActivityScreen(
                 FilterChip(
                     selected = selectedFilter == "ALL",
                     onClick = { selectedFilter = "ALL" },
-                    label = { Text("ALL (${webLogs.size})") }
+                    label = { Text("ALL (${timeFilteredLogs.size})") }
                 )
                 FilterChip(
                     selected = selectedFilter == "BLOCKED",
@@ -179,10 +249,48 @@ fun WebActivityScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             if (filteredLogs.isEmpty()) {
-                EmptyStateView(
-                    title = "No Web Activity Logged",
-                    message = "No browsing logs match your search or filter criteria."
-                )
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = SecurityGreen,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No Web Activity Logged (Last 7 Days)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Sophos Central only forwards web activity to the cloud when an endpoint hits a Blocked or Warned category (e.g. Social Media, Gambling, Phishing) or through scheduled Data Lake (XDR) queries. Normal allowed browsing is not uploaded by default for privacy compliance.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DarkOnSurfaceMuted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Button(
+                            onClick = { MockSecurityRepository.refreshWebLogs7Days() },
+                            colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("RUN 7-DAY DATA LAKE SCAN", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 12.sp)
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
