@@ -35,9 +35,29 @@ fun WebActivityScreen(
     val webLogs by MockSecurityRepository.getWebLogs().collectAsState(initial = emptyList())
     val isSyncing by MockSecurityRepository.isSyncing.collectAsState(initial = false)
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, BLOCKED, WARNED, ALLOWED, SOCIAL, STREAMING, CLOUD, AI
-    var selectedTimeRange by remember { mutableStateOf("7D") } // 7D, 24H, ALL
+    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, AI, BLOCKED, WARNED, ALLOWED, SOCIAL, STREAMING, CLOUD
+    var selectedTimeRange by remember { mutableStateOf("30D") } // 30D, 7D, 24H, ALL
     var selectedLogForDetail by remember { mutableStateOf<WebActivityLog?>(null) }
+
+    val aiKeywords = remember {
+        listOf(
+            "chatgpt", "openai", "claude", "anthropic", "copilot",
+            "gemini", "bard", "perplexity", "poe.com", "huggingface",
+            "midjourney", "deepseek", "meta.ai", "character.ai",
+            "jasper.ai", "generative ai", "ai tool", "llm"
+        )
+    }
+
+    val isAiLog: (WebActivityLog) -> Boolean = remember(aiKeywords) {
+        { log ->
+            log.category.contains("AI", ignoreCase = true) ||
+            aiKeywords.any {
+                log.domain.contains(it, ignoreCase = true) ||
+                log.fullUrl.contains(it, ignoreCase = true) ||
+                log.policyRule.contains(it, ignoreCase = true)
+            }
+        }
+    }
 
     val timeFilteredLogs = remember(webLogs, selectedTimeRange) {
         when (selectedTimeRange) {
@@ -47,7 +67,11 @@ fun WebActivityScreen(
                 it.timestamp.equals("Just now", ignoreCase = true) ||
                 it.timestamp.equals("Recently", ignoreCase = true)
             }
-            "7D" -> webLogs // In Sophos SIEM & Data Lake, 7D covers all ingested logs up to 7 days
+            "7D" -> webLogs.filter {
+                !it.timestamp.contains("days ago") ||
+                (it.timestamp.substringBefore(" days ago").trim().toIntOrNull() ?: 0) <= 7
+            }
+            "30D" -> webLogs
             else -> webLogs
         }
     }
@@ -55,9 +79,10 @@ fun WebActivityScreen(
     val blockedCount = remember(timeFilteredLogs) { timeFilteredLogs.count { it.action == WebAction.BLOCKED } }
     val warnedCount = remember(timeFilteredLogs) { timeFilteredLogs.count { it.action == WebAction.WARNED } }
     val allowedCount = remember(timeFilteredLogs) { timeFilteredLogs.count { it.action == WebAction.ALLOWED || it.action == WebAction.AUDITED } }
+    val aiCount = remember(timeFilteredLogs, isAiLog) { timeFilteredLogs.count { isAiLog(it) } }
     val uniqueUsersCount = remember(timeFilteredLogs) { timeFilteredLogs.map { it.username }.distinct().size }
 
-    val filteredLogs = remember(timeFilteredLogs, searchQuery, selectedFilter) {
+    val filteredLogs = remember(timeFilteredLogs, searchQuery, selectedFilter, isAiLog) {
         timeFilteredLogs.filter { log ->
             val matchesQuery = searchQuery.isEmpty() ||
                     log.domain.contains(searchQuery, ignoreCase = true) ||
@@ -67,13 +92,13 @@ fun WebActivityScreen(
                     log.category.contains(searchQuery, ignoreCase = true)
 
             val matchesFilter = when (selectedFilter) {
+                "AI" -> isAiLog(log)
                 "BLOCKED" -> log.action == WebAction.BLOCKED
                 "WARNED" -> log.action == WebAction.WARNED
                 "ALLOWED" -> log.action == WebAction.ALLOWED || log.action == WebAction.AUDITED
                 "SOCIAL" -> log.category.contains("Social", ignoreCase = true)
                 "STREAMING" -> log.category.contains("Streaming", ignoreCase = true)
                 "CLOUD" -> log.category.contains("Cloud", ignoreCase = true) || log.category.contains("File", ignoreCase = true)
-                "AI" -> log.category.contains("AI", ignoreCase = true)
                 else -> true
             }
 
@@ -119,14 +144,19 @@ fun WebActivityScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         FilterChip(
+                            selected = selectedTimeRange == "30D",
+                            onClick = { selectedTimeRange = "30D" },
+                            label = { Text("30 Days", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "30D") FontWeight.Bold else FontWeight.Normal) }
+                        )
+                        FilterChip(
                             selected = selectedTimeRange == "7D",
                             onClick = { selectedTimeRange = "7D" },
-                            label = { Text("Last 7 Days", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "7D") FontWeight.Bold else FontWeight.Normal) }
+                            label = { Text("7 Days", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "7D") FontWeight.Bold else FontWeight.Normal) }
                         )
                         FilterChip(
                             selected = selectedTimeRange == "24H",
                             onClick = { selectedTimeRange = "24H" },
-                            label = { Text("24 Hours", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "24H") FontWeight.Bold else FontWeight.Normal) }
+                            label = { Text("24h", fontSize = 11.sp, fontWeight = if (selectedTimeRange == "24H") FontWeight.Bold else FontWeight.Normal) }
                         )
                         FilterChip(
                             selected = selectedTimeRange == "ALL",
@@ -136,7 +166,7 @@ fun WebActivityScreen(
                     }
 
                     FilledTonalButton(
-                        onClick = { MockSecurityRepository.refreshWebLogs7Days() },
+                        onClick = { MockSecurityRepository.refreshWebLogs30Days() },
                         enabled = !isSyncing,
                         colors = ButtonDefaults.filledTonalButtonColors(containerColor = SecurityGreen.copy(alpha = 0.15f), contentColor = SecurityGreen),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -148,7 +178,7 @@ fun WebActivityScreen(
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                         }
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isSyncing) "SYNCING..." else "SCAN 7D", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(if (isSyncing) "SYNCING..." else "SCAN 30D", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -176,15 +206,15 @@ fun WebActivityScreen(
                     modifier = Modifier.weight(1f)
                 )
                 WebMiniMetricCard(
-                    title = "Blocked",
-                    value = blockedCount.toString(),
-                    color = SeverityCritical,
+                    title = "AI Visits",
+                    value = aiCount.toString(),
+                    color = Color(0xFFA78BFA),
                     modifier = Modifier.weight(1f)
                 )
                 WebMiniMetricCard(
-                    title = "Warned / Audit",
-                    value = warnedCount.toString(),
-                    color = SeverityHigh,
+                    title = "Blocked",
+                    value = blockedCount.toString(),
+                    color = SeverityCritical,
                     modifier = Modifier.weight(1f)
                 )
                 WebMiniMetricCard(
@@ -208,6 +238,11 @@ fun WebActivityScreen(
                     selected = selectedFilter == "ALL",
                     onClick = { selectedFilter = "ALL" },
                     label = { Text("ALL (${timeFilteredLogs.size})") }
+                )
+                FilterChip(
+                    selected = selectedFilter == "AI",
+                    onClick = { selectedFilter = "AI" },
+                    label = { Text("CHATGPT & AI ($aiCount)") }
                 )
                 FilterChip(
                     selected = selectedFilter == "BLOCKED",
@@ -239,55 +274,95 @@ fun WebActivityScreen(
                     onClick = { selectedFilter = "CLOUD" },
                     label = { Text("CLOUD STORAGE") }
                 )
-                FilterChip(
-                    selected = selectedFilter == "AI",
-                    onClick = { selectedFilter = "AI" },
-                    label = { Text("AI TOOLS") }
-                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             if (filteredLogs.isEmpty()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                if (selectedFilter == "AI") {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(Color(0xFF8B5CF6).copy(alpha = 0.4f)))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = SecurityGreen,
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "No Web Activity Logged (Last 7 Days)",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Sophos Central only forwards web activity to the cloud when an endpoint hits a Blocked or Warned category (e.g. Social Media, Gambling, Phishing) or through scheduled Data Lake (XDR) queries. Normal allowed browsing is not uploaded by default for privacy compliance.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = DarkOnSurfaceMuted,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Button(
-                            onClick = { MockSecurityRepository.refreshWebLogs7Days() },
-                            colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen),
-                            shape = RoundedCornerShape(8.dp)
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("RUN 7-DAY DATA LAKE SCAN", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 12.sp)
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = null,
+                                tint = Color(0xFFA78BFA),
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "0 ChatGPT / AI Tool Logs Recorded ($selectedTimeRange)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "None of your 2,691 monitored endpoints have recorded blocked or warned visits to ChatGPT (chatgpt.com), Claude (claude.ai), Google Gemini, Microsoft Copilot, or DeepSeek in this period.\n\nWhy this happens in Sophos Central:\n1. Allowed Browsing Policy: Sophos Central does NOT report allowed web browsing to the cloud for user privacy unless configured.\n2. To track ChatGPT visits: In Sophos Central Admin > Endpoint Policies > Web Control > set category 'Generative AI' to 'Block' or 'Warn' or 'Audit'.\n3. In Application Control, enable monitoring for 'ChatGPT' and 'AI Tools'.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DarkOnSurfaceMuted,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Start
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = { MockSecurityRepository.refreshWebLogs30Days() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("RUN 30-DAY AI HUNT", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                } else {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp, brush = androidx.compose.ui.graphics.SolidColor(DarkBorder))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = SecurityGreen,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "No Web Activity Logged (Last 30 Days)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Sophos Central only forwards web activity to the cloud when an endpoint hits a Blocked or Warned category (e.g. Social Media, Gambling, Phishing) or through scheduled Data Lake (XDR) queries. Normal allowed browsing is not uploaded by default for privacy compliance.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DarkOnSurfaceMuted,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = { MockSecurityRepository.refreshWebLogs30Days() },
+                                colors = ButtonDefaults.buttonColors(containerColor = SecurityGreen),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("RUN 30-DAY DATA LAKE SCAN", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 12.sp)
+                            }
                         }
                     }
                 }

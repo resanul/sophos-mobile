@@ -98,7 +98,15 @@ object MockSecurityRepository {
             description = "Query Sophos Data Lake for all HTTP/HTTPS DNS requests, visited domains, and web filtering blocks across all endpoints",
             mitreTactic = "Initial Access / Command and Control (T1071.001)",
             querySql = "SELECT time, username, host_identifier, query AS domain, process_name, remote_address FROM xdr_data_lake_dns_activity ORDER BY time DESC LIMIT 100;",
-            parameters = listOf("TimeRange: 24h", "Protocol: DNS/HTTPS")
+            parameters = listOf("TimeRange: 30d", "Protocol: DNS/HTTPS")
+        ),
+        ThreatHuntTemplate(
+            id = "th-tmpl-04",
+            name = "Shadow AI & ChatGPT Access Hunter",
+            description = "Hunt for visits to ChatGPT, OpenAI, Claude, Copilot, Gemini, and Generative AI tools across all endpoints in the last 30 days",
+            mitreTactic = "Exfiltration / Shadow IT",
+            querySql = "SELECT time, username, host_identifier, query AS domain, process_name FROM xdr_data_lake_dns_activity WHERE query LIKE '%chatgpt%' OR query LIKE '%openai%' OR query LIKE '%claude%' OR query LIKE '%deepseek%' LIMIT 100;",
+            parameters = listOf("TimeRange: 30d", "Category: Generative AI")
         )
     )
 
@@ -418,6 +426,10 @@ object MockSecurityRepository {
     }
 
     fun refreshWebLogs7Days(onComplete: (Int) -> Unit = {}) {
+        refreshWebLogs30Days(onComplete)
+    }
+
+    fun refreshWebLogs30Days(onComplete: (Int) -> Unit = {}) {
         val creds = EncryptedStorageManager.getActiveCredentials()
         if (creds != null) {
             clientId = creds.first
@@ -908,16 +920,16 @@ object MockSecurityRepository {
                 }
             }
 
-            // 3C. Attempt Sophos XDR Data Lake 7-day query
+            // 3C. Attempt Sophos XDR Data Lake 30-day query
             try {
-                val sevenDaysAgoIso = java.time.Instant.now().minus(java.time.Duration.ofDays(7)).toString()
+                val thirtyDaysAgoIso = java.time.Instant.now().minus(java.time.Duration.ofDays(30)).toString()
                 val nowIso = java.time.Instant.now().toString()
                 val xdrBody = """
                     {
                         "adHocQuery": {
-                            "template": "SELECT meta_hostname, username, url, domain, web_category, time, action FROM xdr_data WHERE time >= '$sevenDaysAgoIso' LIMIT 500"
+                            "template": "SELECT meta_hostname, username, url, domain, web_category, time, action FROM xdr_data WHERE time >= '$thirtyDaysAgoIso' LIMIT 1000"
                         },
-                        "from": "$sevenDaysAgoIso",
+                        "from": "$thirtyDaysAgoIso",
                         "to": "$nowIso"
                     }
                 """.trimIndent()
@@ -1156,6 +1168,23 @@ object MockSecurityRepository {
                             "title" to "Domain: ${log.domain} (${log.policyRule})",
                             "detail" to "Enforced Action: ${log.action} | Category: ${log.category} | Browser: ${log.browser}",
                             "severity" to if (log.action == WebAction.BLOCKED) "CRITICAL" else if (log.action == WebAction.WARNED) "HIGH" else "INFO"
+                        )
+                    )
+                }
+            }
+            "job-th-tmpl-04" -> {
+                val aiKeywords = listOf("chatgpt", "openai", "claude", "anthropic", "copilot", "gemini", "bard", "perplexity", "deepseek", "generative ai")
+                val aiLogs = webLogs.value.filter { log ->
+                    log.category.contains("AI", true) ||
+                    aiKeywords.any { log.domain.contains(it, true) || log.fullUrl.contains(it, true) || log.policyRule.contains(it, true) }
+                }
+                for (log in aiLogs) {
+                    results.add(
+                        mapOf(
+                            "header" to "Host: ${log.endpointHostname} | User: ${log.username} | Time: ${log.timestamp}",
+                            "title" to "AI Service: ${log.domain} (${log.policyRule})",
+                            "detail" to "Action: ${log.action} | Browser: ${log.browser} | Category: ${log.category}",
+                            "severity" to if (log.action == WebAction.BLOCKED) "HIGH" else "MEDIUM"
                         )
                     )
                 }

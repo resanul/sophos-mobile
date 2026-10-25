@@ -112,4 +112,10 @@ class MockRepositoryTest {
         assertTrue(results.isNotEmpty())
         assertTrue(results.any { it["title"]?.contains("facebook.com") == true })
     }
+
+    @Test
+    fun testExecuteThreatHuntAI() {
+        val results = MockSecurityRepository.executeThreatHunt("job-th-tmpl-04")
+        assertNotNull(results)
+    }
 }
